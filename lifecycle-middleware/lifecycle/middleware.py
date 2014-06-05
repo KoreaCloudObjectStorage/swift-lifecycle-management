@@ -13,6 +13,7 @@ from utils import *
 
 
 LifeCycle_Response_Header = 'X-Lifecycle-Response'
+LifeCycle_Sysmeta = 'X-Container-Sysmeta-Lifecycle'
 
 def get_err_response(err):
     """
@@ -46,20 +47,55 @@ class LifecycleManageController(WSGIContext):
     def GET(self, env, start_response):
         req = Request(env)
 
-        # 요청을 HEAD로 변환하여 Container 의 metadata를 가져옴
         req.method = 'HEAD'
+
+        # TODO Container가 존재하지 않는 경우
         resp = req.get_response(self.app)
+        status = get_status_int(resp.status)
 
-        lifecycle_dict = resp.headers['X-Container-Sysmeta-Lifecycle']
-
-        # 다시 원래 요청으로 되돌림.
         req.method = 'GET'
-        ret = Response(request=req, body=lifecycle_dict)
+
+        if status is not HTTP_NO_CONTENT:
+            return resp
+
+        if LifeCycle_Sysmeta in resp.headers and resp.headers[LifeCycle_Sysmeta] != 'None':
+            lifecycle = resp.headers[LifeCycle_Sysmeta]
+
+        else:
+            container, obj = split_path(req.path, 0, 2, True)
+
+            resp = Response(content_type='text/xml')
+            resp.status = HTTP_NOT_FOUND
+            resp.body = '<?xml version="1.0" encoding="UTF-8"?>' \
+                        '<Error><Code>NoSuchLifecycleConfiguration</Code>'\
+                        '<Message>The lifecycle configuration does not exist</Message>'\
+                        '<BucketName>%s</BucketName></Error>' % container
+            resp.headers[LifeCycle_Response_Header] = True
+            return resp
+
+        lifecycle = list_to_xml(lifecycle)
+        ret = Response(request=req, body=lifecycle, headers={LifeCycle_Response_Header: True})
         return ret
 
     def DELETE(self, env, start_response):
-        print 'delete'
-        return Response()
+        req = Request(env)
+
+        req.method = 'HEAD'
+        resp = req.get_response(self.app)
+
+        req.method = 'DELETE'
+        status = get_status_int(resp.status)
+
+        if status is not HTTP_NO_CONTENT:
+            return resp
+
+        if LifeCycle_Sysmeta in resp.headers:
+            req.method = 'POST'
+            req.headers[LifeCycle_Sysmeta] = 'None'
+            resp = req.get_response(self.app)
+
+        req.method = 'DELETE'
+        return Response(status=HTTP_NO_CONTENT)
 
 
     def PUT(self, env, start_response):
@@ -67,17 +103,15 @@ class LifecycleManageController(WSGIContext):
         lifecycle_xml = req.body
         try:
 
-            lifecycle = xmltolist(lifecycle_xml)
-            print "BEFORE"
-            print lifecycle
+            lifecycle = xml_to_list(lifecycle_xml)
             # 이전 Lifecycle을 가져옴
 
             req.method = "HEAD"
             resp = req.get_response(self.app)
 
             prevLifecycle = None
-            if resp.headers['X-Container-Sysmeta-Lifecycle'] is not None:
-                prevLifecycle = resp.headers['X-Container-Sysmeta-Lifecycle']
+            if LifeCycle_Sysmeta in resp.headers and resp.headers[LifeCycle_Sysmeta] != 'None':
+                prevLifecycle = resp.headers[LifeCycle_Sysmeta]
 
             if prevLifecycle is not None:
                 updateLifecycleMetadata(prevLifecycle, lifecycle)
@@ -85,11 +119,9 @@ class LifecycleManageController(WSGIContext):
             # Rule이 올바르게 설정되어 있는 지 검사
             validationCheck(lifecycle)
 
-            print "After"
-            print lifecycle
             # 새로운 lifecycle로 변경
             req.method = "POST"
-            req.headers['X-Container-Sysmeta-Lifecycle'] = lifecycle
+            req.headers[LifeCycle_Sysmeta] = lifecycle
 
             resp = req.get_response(self.app)
 
@@ -99,9 +131,9 @@ class LifecycleManageController(WSGIContext):
         except LifecycleConfigurationException as e:
             env['REQUEST_METHOD'] = 'PUT'
             return get_err_response(e.message)
-        r = Response(status=201, app_iter='True', headers={LifeCycle_Response_Header: True})
-        print r.headers
-        return r
+
+        return Response(status=201, app_iter='True', headers={LifeCycle_Response_Header: True})
+
 
 
 class LifecycleMiddleware(object):

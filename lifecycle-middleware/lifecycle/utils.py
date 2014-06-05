@@ -4,12 +4,13 @@ from swift.common.swob import Response
 from swift.common.http import HTTP_BAD_REQUEST
 
 import xml.etree.ElementTree as ET
+import xml.etree.cElementTree as ET
 import time
 import json
 from exceptions import LifecycleConfigurationException
 
 
-def xmltolist(xml):
+def xml_to_list(xml):
     root = ET.fromstring(xml)
     rules = root.findall("Rule")
 
@@ -116,13 +117,11 @@ def validationCheck(rulelist):
     tmpIndex = None
     for i in range(length - 1):
         basePrefix = sortedList[i]['Prefix']
-
         if tmpIndex and i < tmpIndex:
             continue
 
-        for j in range(1, length):
+        for j in range(i+1, length):
             comparePrefix = sortedList[j]['Prefix']
-
             if basePrefix == comparePrefix:
                 exceptionMsg = dict()
                 exceptionMsg['status'] = 400
@@ -150,3 +149,27 @@ def validationCheck(rulelist):
                 tmpIndex = j
         if tmpIndex:
             tmpIndex += 1
+
+
+def list_to_xml(rulelist):
+    root = ET.Element('LifecycleConfiguration')
+    rulelist = json.loads(rulelist.replace('\'', '\"'))
+    for rule in rulelist:
+        rulenode = ET.SubElement(root, 'Rule')
+
+        for key, value in rule.items():
+            if type(value) is dict:
+                action = ET.SubElement(rulenode,key)
+                for dickey, dicvalue in value.items():
+                    if not dickey.startswith(key.lower()):
+                        child = ET.SubElement(action, dickey)
+                        child.text = dicvalue
+            else:
+                child = ET.SubElement(rulenode,key)
+                child.text = value
+
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" + ET.tostring(root)
+
+
+def get_status_int(status):
+    return int(status.split(' ', 1)[0])
