@@ -102,7 +102,6 @@ class LifecycleManageController(WSGIContext):
         req = Request(env)
         lifecycle_xml = req.body
         try:
-
             lifecycle = xml_to_list(lifecycle_xml)
             # 이전 Lifecycle을 가져옴
 
@@ -132,7 +131,7 @@ class LifecycleManageController(WSGIContext):
             env['REQUEST_METHOD'] = 'PUT'
             return get_err_response(e.message)
 
-        return Response(status=201, app_iter='True', headers={LifeCycle_Response_Header: True})
+        return Response(status=200, app_iter='True', headers={LifeCycle_Response_Header: True})
 
 
 
