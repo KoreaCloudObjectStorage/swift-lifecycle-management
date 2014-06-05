@@ -8,59 +8,25 @@ from swift.common.http import HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED, \
     HTTP_NOT_IMPLEMENTED, HTTP_LENGTH_REQUIRED, HTTP_SERVICE_UNAVAILABLE, \
     HTTP_REQUEST_ENTITY_TOO_LARGE
 
-import xml.etree.ElementTree as ET
+from exceptions import LifecycleConfigurationException
+from utils import *
 
 
-def get_err_response(code):
+LifeCycle_Response_Header = 'X-Lifecycle-Response'
+
+def get_err_response(err):
     """
     Given an HTTP response code, create a properly formatted xml error response
 
     :param code: error code
     :returns: webob.response object
     """
-    error_table = {
-        'AccessDenied':
-            (HTTP_FORBIDDEN, 'Access denied'),
-        'BucketAlreadyExists':
-            (HTTP_CONFLICT, 'The requested bucket name is not available'),
-        'BucketNotEmpty':
-            (HTTP_CONFLICT, 'The bucket you tried to delete is not empty'),
-        'InvalidArgument':
-            (HTTP_BAD_REQUEST, 'Invalid Argument'),
-        'InvalidBucketName':
-            (HTTP_BAD_REQUEST, 'The specified bucket is not valid'),
-        'InvalidURI':
-            (HTTP_BAD_REQUEST, 'Could not parse the specified URI'),
-        'InvalidDigest':
-            (HTTP_BAD_REQUEST, 'The Content-MD5 you specified was invalid'),
-        'BadDigest':
-            (HTTP_BAD_REQUEST, 'The Content-Length you specified was invalid'),
-        'EntityTooLarge':
-            (HTTP_BAD_REQUEST, 'Your proposed upload exceeds the maximum '
-                               'allowed object size.'),
-        'NoSuchBucket':
-            (HTTP_NOT_FOUND, 'The specified bucket does not exist'),
-        'SignatureDoesNotMatch':
-            (HTTP_FORBIDDEN, 'The calculated request signature does not '
-                             'match your provided one'),
-        'RequestTimeTooSkewed':
-            (HTTP_FORBIDDEN, 'The difference between the request time and the'
-                             ' current time is too large'),
-        'NoSuchKey':
-            (HTTP_NOT_FOUND, 'The resource you requested does not exist'),
-        'Unsupported':
-            (HTTP_NOT_IMPLEMENTED, 'The feature you requested is not yet'
-                                   ' implemented'),
-        'MissingContentLength':
-            (HTTP_LENGTH_REQUIRED, 'Length Required'),
-        'ServiceUnavailable':
-            (HTTP_SERVICE_UNAVAILABLE, 'Please reduce your request rate')}
 
     resp = Response(content_type='text/xml')
-    resp.status = error_table[code][0]
-    resp.body = '<?xml version="1.0" encoding="UTF-8"?>\r\n<Error>\r\n  ' \
-                '<Code>%s</Code>\r\n  <Message>%s</Message>\r\n</Error>\r\n' \
-                % (code, error_table[code][1])
+    resp.status = err['status']
+    resp.body = """<?xml version="1.0" encoding="UTF-8"?><Error><Code>%s</Code><Message>%s</Message></Error>""" \
+                % (err['code'], err['msg'])
+    resp.headers = {LifeCycle_Response_Header: True}
     return resp
 
 
@@ -99,20 +65,40 @@ class LifecycleManageController(WSGIContext):
     def PUT(self, env, start_response):
         req = Request(env)
         lifecycle_xml = req.body
+        try:
 
-        doc = self.xmltodict(lifecycle_xml)
+            lifecycle = xmltodict(lifecycle_xml)
 
-        req.method = "POST"
-        req.headers['X-Container-Sysmeta-Lifecycle'] = str(doc)
+            # 이전 Lifecycle을 가져옴
 
-        req.get_response(self.app)
-        return Response(status=201)
+            req.method = "HEAD"
+            resp = req.get_response(self.app)
 
-    def xmltodict(self, xml):
-        """
-        XML을 dictionary로 변환시켜줌.
-        """
-        return 'do something'
+            prevLifecycle = None
+            if resp.headers['X-Container-Sysmeta-Lifecycle'] is not None:
+                prevLifecycle = resp.headers['X-Container-Sysmeta-Lifecycle']
+
+            if prevLifecycle is not None:
+                updateLifecycleMetadata(prevLifecycle, lifecycle)
+
+            # Rule이 올바르게 설정되어 있는 지 검사
+            validationCheck(lifecycle)
+
+            # 새로운 lifecycle로 변경
+            req.method = "POST"
+            req.headers['X-Container-Sysmeta-Lifecycle'] = lifecycle
+
+            resp = req.get_response(self.app)
+
+            # env를 원래 상태로 되돌림.
+            req.method = 'PUT'
+
+        except LifecycleConfigurationException as e:
+            env['REQUEST_METHOD'] = 'PUT'
+            return get_err_response(e.message)
+        r = Response(status=201, app_iter='True', headers={LifeCycle_Response_Header: True})
+        print r.headers
+        return r
 
 
 class LifecycleMiddleware(object):
@@ -128,7 +114,7 @@ class LifecycleMiddleware(object):
         container, obj = split_path(path, 0, 2, True)
 
         if container:
-            if 'lifecycle' or 'lifecycle_rule' in req.params:
+            if 'lifecycle' in req.params or 'lifecycle_rule' in req.params:
                 return LifecycleManageController
         return None
 
