@@ -13,20 +13,33 @@ from exceptions import LifecycleConfigurationException
 def xml_to_list(xml):
     root = ET.fromstring(xml)
     rules = root.findall("Rule")
-
     rulelist = list()
 
+    # TODO 1000개가 넘을 경우 정확히 어떤 메세지가 오는지 확인해야함.
     if len(rules) > 1000:
         exceptionMsg = dict();
         exceptionMsg['code'] = "OverUploadedRules"
+        exceptionMsg['msg'] = "1000"
         raise LifecycleConfigurationException(exceptionMsg)
 
-    # TODO prefix 중복 검사 - 서로다른 rule 이여도 prefix가 같고, expire, transition이 각각 설정되어있는 경우를 고려해야함.
     for rule in rules:
         ruledata = dict()
 
-        id = rule.find("ID").text
+
         prefix = rule.find("Prefix").text
+
+        if prefix is None:
+            prefix = ''
+
+        if rule.find('ID') is not None:
+            id = rule.find("ID").text
+        else:
+            id = 'Rule for %s '
+            if prefix == '':
+                id += 'the Entire Bucket'
+            else:
+                id += prefix
+
         status = rule.find("Status").text
 
         ruledata.update(ID=id)
