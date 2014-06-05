@@ -9,7 +9,7 @@ import json
 from exceptions import LifecycleConfigurationException
 
 
-def xmltodict(xml):
+def xmltolist(xml):
     root = ET.fromstring(xml)
     rules = root.findall("Rule")
 

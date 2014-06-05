@@ -67,8 +67,9 @@ class LifecycleManageController(WSGIContext):
         lifecycle_xml = req.body
         try:
 
-            lifecycle = xmltodict(lifecycle_xml)
-
+            lifecycle = xmltolist(lifecycle_xml)
+            print "BEFORE"
+            print lifecycle
             # 이전 Lifecycle을 가져옴
 
             req.method = "HEAD"
@@ -84,6 +85,8 @@ class LifecycleManageController(WSGIContext):
             # Rule이 올바르게 설정되어 있는 지 검사
             validationCheck(lifecycle)
 
+            print "After"
+            print lifecycle
             # 새로운 lifecycle로 변경
             req.method = "POST"
             req.headers['X-Container-Sysmeta-Lifecycle'] = lifecycle
