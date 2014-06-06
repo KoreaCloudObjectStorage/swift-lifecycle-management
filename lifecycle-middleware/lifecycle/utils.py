@@ -4,9 +4,8 @@ from swift.common.swob import Response
 from swift.common.http import HTTP_BAD_REQUEST
 
 import xml.etree.ElementTree as ET
-import xml.etree.cElementTree as ET
 import time
-import json
+import ast
 from exceptions import LifecycleConfigurationException
 
 
@@ -101,9 +100,8 @@ def normalize_timestamp(timestamp):
 
 
 def updateLifecycleMetadata(prevLifecycle, currLifecycle):
-    prevLifecycle = prevLifecycle.replace('\'', '\"')
 
-    prevLifecycle = json.loads(prevLifecycle)
+    prevLifecycle = ast.literal_eval(prevLifecycle)
     for curr in currLifecycle:
         currId = curr['ID']
 
@@ -166,7 +164,7 @@ def validationCheck(rulelist):
 
 def list_to_xml(rulelist):
     root = ET.Element('LifecycleConfiguration')
-    rulelist = json.loads(rulelist.replace('\'', '\"'))
+
     for rule in rulelist:
         rulenode = ET.SubElement(root, 'Rule')
 
@@ -183,6 +181,22 @@ def list_to_xml(rulelist):
 
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" + ET.tostring(root)
 
+def dict_to_xml(rule):
+
+    root = ET.Element('LifecycleConfiguration')
+    rulenode = ET.SubElement(root, 'Rule')
+
+    for key, value in rule.items():
+        if type(value) is dict:
+            action = ET.SubElement(rulenode, key)
+            for dickey, dicvalue in value.items():
+                if not dickey.startswith(key.lower()):
+                    child = ET.SubElement(action, dickey)
+                    child.text = dicvalue
+        else:
+            child = ET.SubElement(rulenode,key)
+            child.text = value
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" + ET.tostring(root)
 
 def get_status_int(status):
     return int(status.split(' ', 1)[0])
