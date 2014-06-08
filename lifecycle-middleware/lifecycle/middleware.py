@@ -2,14 +2,10 @@
 from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path
 from swift.common.wsgi import WSGIContext
-from swift.common.http import HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED, \
-    HTTP_NO_CONTENT, HTTP_BAD_REQUEST, HTTP_UNAUTHORIZED, HTTP_FORBIDDEN, \
-    HTTP_NOT_FOUND, HTTP_CONFLICT, HTTP_UNPROCESSABLE_ENTITY, is_success, \
-    HTTP_NOT_IMPLEMENTED, HTTP_LENGTH_REQUIRED, HTTP_SERVICE_UNAVAILABLE, \
-    HTTP_REQUEST_ENTITY_TOO_LARGE
+from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND
 
 from exceptions import LifecycleConfigurationException
-from utils import *
+from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, updateLifecycleMetadata, validationCheck
 import ast
 from operator import itemgetter
 
