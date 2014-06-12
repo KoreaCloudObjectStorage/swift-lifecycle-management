@@ -1,13 +1,14 @@
 # coding=utf-8
+import ast
+from operator import itemgetter
+from copy import copy
+
 from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path
 from swift.common.wsgi import WSGIContext
 from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND
-
 from exceptions import LifecycleConfigurationException
 from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, updateLifecycleMetadata, validationCheck
-import ast
-from operator import itemgetter
 
 
 LifeCycle_Response_Header = 'X-Lifecycle-Response'
@@ -80,14 +81,14 @@ class LifecycleManageController(WSGIContext):
                 lifecycle = lifecycle[map(itemgetter('ID'), lifecycle).index(req.params['lifecycle_rule'])]
                 lifecycle = dict_to_xml(lifecycle)
             except Exception as e:
+                # TODO rule 별 조회시 해당 ID가 없을 경우 메세지 내용 알아보기
                 return Response(status=400, body=e.message, headers={LifeCycle_Response_Header: True})
 
         ret = Response(request=req, body=lifecycle, headers={LifeCycle_Response_Header: True})
         return ret
 
     def DELETE(self, env, start_response):
-        req = Request(env)
-
+        req = Request(copy(env))
         req.method = 'HEAD'
         resp = req.get_response(self.app)
 
@@ -99,32 +100,38 @@ class LifecycleManageController(WSGIContext):
         if LifeCycle_Sysmeta in resp.headers:
 
             if 'lifecycle' in req.params:
+                req = Request(copy(env))
                 req.method = 'POST'
                 req.headers[LifeCycle_Sysmeta] = 'None'
                 req.get_response(self.app)
             elif 'lifecycle_rule' in req.params:
                 id = req.params['lifecycle_rule']
                 lifecycle = ast.literal_eval(resp.headers[LifeCycle_Sysmeta])
+                newlifecycle = filter(lambda x : x.get('ID') != id, lifecycle)
+                if not newlifecycle:
+                    newlifecycle = 'None'
+
+                req = Request(copy(env))
                 req.method = 'POST'
-                newl = filter(lambda x : x.get('ID') != id, lifecycle)
-                if not newl:
-                    newl = 'None'
-                req.headers[LifeCycle_Sysmeta] = newl
+                req.headers[LifeCycle_Sysmeta] = newlifecycle
                 req.get_response(self.app)
 
-        req.method = 'DELETE'
         return Response(status=HTTP_NO_CONTENT)
 
 
     def PUT(self, env, start_response):
-        req = Request(env)
-        lifecycle_xml = req.body
         try:
+            req = Request(copy(env))
+            lifecycle_xml = req.body
             lifecycle = xml_to_list(lifecycle_xml)
             # 이전 Lifecycle을 가져옴
 
             req.method = "HEAD"
             resp = req.get_response(self.app)
+            resp_status = get_status_int(resp.status)
+
+            if resp_status is not HTTP_NO_CONTENT:
+                return resp
 
             prevLifecycle = None
             if LifeCycle_Sysmeta in resp.headers and resp.headers[LifeCycle_Sysmeta] != 'None':
@@ -139,10 +146,15 @@ class LifecycleManageController(WSGIContext):
                 validationCheck(lifecycle)
 
                 # 새로운 lifecycle로 변경
+                req = Request(copy(env))
                 req.method = "POST"
                 req.headers[LifeCycle_Sysmeta] = lifecycle
 
-                req.get_response(self.app)
+                resp = req.get_response(self.app)
+                resp_status = get_status_int(resp.status)
+
+                if resp_status is not HTTP_NO_CONTENT:
+                    return resp
 
             elif 'lifecycle_rule' in req.params:
                 if len(lifecycle) > 1:
@@ -204,15 +216,19 @@ class LifecycleManageController(WSGIContext):
                     prevLifecycle = list()
 
                 prevLifecycle.append(rule)
+                req = Request(copy(env))
                 req.method = "POST"
                 req.headers[LifeCycle_Sysmeta] = prevLifecycle
-                req.get_response(self.app)
+                resp = req.get_response(self.app)
+                resp_status = get_status_int(resp.status)
+
+                if resp_status is not HTTP_NO_CONTENT:
+                    return resp
 
         except LifecycleConfigurationException as e:
             env['REQUEST_METHOD'] = 'PUT'
             return get_err_response(e.message)
 
-        req.method = 'PUT'
         return Response(status=200, app_iter='True', headers={LifeCycle_Response_Header: True})
 
 
