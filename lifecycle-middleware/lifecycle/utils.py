@@ -100,7 +100,6 @@ def normalize_timestamp(timestamp):
 
 
 def updateLifecycleMetadata(prevLifecycle, currLifecycle):
-
     prevLifecycle = ast.literal_eval(prevLifecycle)
     for curr in currLifecycle:
         currId = curr['ID']
@@ -182,7 +181,6 @@ def list_to_xml(rulelist):
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" + ET.tostring(root)
 
 def dict_to_xml(rule):
-
     root = ET.Element('LifecycleConfiguration')
     rulenode = ET.SubElement(root, 'Rule')
 
