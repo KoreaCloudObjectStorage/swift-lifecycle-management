@@ -30,10 +30,10 @@ def xml_to_list(xml):
         if prefix is None:
             prefix = ''
 
-        if rule.find('ID') is not None:
+        if rule.find('ID').text is not None:
             id = rule.find("ID").text
         else:
-            id = 'Rule for %s '
+            id = 'Rule for '
             if prefix == '':
                 id += 'the Entire Bucket'
             else:
