@@ -22,7 +22,6 @@ def xml_to_list(xml):
     for rule in rules:
         ruledata = dict()
 
-
         prefix = rule.find("Prefix").text
 
         if prefix is None:
@@ -178,6 +177,7 @@ def list_to_xml(rulelist):
 
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" + ET.tostring(root)
 
+
 def dict_to_xml(rule):
     root = ET.Element('LifecycleConfiguration')
     rulenode = ET.SubElement(root, 'Rule')
@@ -193,6 +193,7 @@ def dict_to_xml(rule):
             child = ET.SubElement(rulenode,key)
             child.text = value
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" + ET.tostring(root)
+
 
 def get_status_int(status):
     return int(status.split(' ', 1)[0])
