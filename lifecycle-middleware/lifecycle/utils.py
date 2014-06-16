@@ -4,8 +4,6 @@ import xml.etree.ElementTree as ET
 import time
 import ast
 
-from swift.common.swob import Response
-from swift.common.http import HTTP_BAD_REQUEST
 from exceptions import LifecycleConfigurationException
 
 
