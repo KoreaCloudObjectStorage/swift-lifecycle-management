@@ -1,18 +1,23 @@
 # coding=utf-8
 import ast
+import time
+import calendar
+import re
+from datetime import datetime
+from urllib2 import unquote
 from operator import itemgetter
 from copy import copy
 
 from swift.common.swob import Request, Response
-from swift.common.utils import get_logger, split_path
+from swift.common.utils import get_logger, split_path, normalize_delete_at_timestamp, normalize_timestamp
 from swift.common.wsgi import WSGIContext
-from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND
+from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK
+from swift.common.ring import Ring
+from swift.common.bufferedhttp import http_connect
 from exceptions import LifecycleConfigurationException
-from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, updateLifecycleMetadata, validationCheck
-
-
-LifeCycle_Response_Header = 'X-Lifecycle-Response'
-LifeCycle_Sysmeta = 'X-Container-Sysmeta-Lifecycle'
+from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, updateLifecycleMetadata, validationCheck,\
+    is_Lifecycle_in_Header, LifeCycle_Sysmeta, LifeCycle_Response_Header, get_lifecycle_headers, calc_nextDay,\
+    day_seconds, outbound_filter
 
 
 def get_err_response(err):
@@ -31,17 +36,129 @@ def get_err_response(err):
     return resp
 
 
-class LifecyclePropagateController(WSGIContext):
-    """
-    Lifecycle propagate Controller to PUT Object
-    """
+class ObjectController(WSGIContext):
 
-    def __init__(self, app):
+    def __init__(self, app, account, container_name, object_name, **kwargs):
         WSGIContext.__init__(self, app)
+        self.account = account
+        self.container = container_name
+        self.object = object_name
+        self.hidden_accounts = {'expire': '.s3_expiring_objects', 'transition': '.s3_transitioning_objects'}
+        self.container_ring = Ring('/etc/swift', ring_name='container')
+
+    def GETorHEAD(self, env, start_response):
+        req = Request(copy(env))
+        resp = req.get_response(self.app)
+        status = get_status_int(resp.status)
+        rule_id_meta = 'X-Object-Meta-Rule-Id'
+        if status is not HTTP_OK:
+            return resp
+
+        # convert last_modified(UTC TIME) to Unix Timestamp
+        last_modified = datetime.strptime(resp.headers['Last-Modified'], '%a, %d %b %Y %H:%M:%S GMT')
+        last_modified = calendar.timegm(last_modified.utctimetuple())
+        if rule_id_meta in resp.headers:
+            rule_id = resp.headers[rule_id_meta]
+
+            # GET Lifecycle by rule id
+            path = "/v1/%s/%s" % (self.account, self.container)
+            req = Request(copy(env))
+            req.method = "HEAD"
+            req.path_info = path
+            l_resp = req.get_response(self.app)
+            if get_status_int(l_resp.status) is HTTP_NO_CONTENT:
+                lifecycle = ast.literal_eval(l_resp.headers[LifeCycle_Sysmeta])
+            else:
+                return self.app
+
+            lifecycle = lifecycle[map(itemgetter('ID'), lifecycle).index(rule_id)]
+            if 'Expiration' in lifecycle:
+                expiration = lifecycle['Expiration']
+                if 'Days' in expiration:
+                    expire_at = normalize_delete_at_timestamp(calc_nextDay(last_modified) \
+                                                       + int(expiration['Days'])*day_seconds)
+                elif 'Date' in expiration:
+                    expire_at = calendar.timegm(\
+                        datetime.strptime(expiration['Date'], "%Y-%m-%dT%H:%M:%S+00:00").timetuple())
+
+                expire_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(float(expire_at)))
+                resp.headers['X-Amz-Expiration'] = 'expiry-date="%s", rule-id="%s"' % (expire_date, rule_id)
+
+        # 불필요한 header 제거
+        reg = re.compile('|'.join(outbound_filter), re.IGNORECASE).match
+        removed = filter(reg, resp.headers)
+
+        if removed:
+            for r in removed:
+                resp.headers.pop(r)
+
+        return resp
+
+    def GET(self, env, start_response):
+        return self.GETorHEAD(env, start_response)
+
+    def POST(self, env, start_response):
+        pass
+
+    def DELETE(self, env, start_response):
+        pass
+
+    def HEAD(self, env, start_response):
+        return self.GETorHEAD(env, start_response)
+
+    def PUT(self, env, start_response):
+        req = Request(copy(env))
+        req.method = 'HEAD'
+        req.path_info = '/v1/%s/%s' % (self.account, self.container)
+        resp = req.get_response(self.app)
+        status = get_status_int(resp.status)
+        if status is not HTTP_NO_CONTENT:
+            return resp
+
+        actionList = dict()
+        headers = dict()
+
+        if is_Lifecycle_in_Header(resp.headers):
+            lifecycle = ast.literal_eval(resp.headers[LifeCycle_Sysmeta])
+
+            for rule in lifecycle:
+                prefix = rule['Prefix']
+                if self.object.startswith(prefix):
+                    headers, actionList = get_lifecycle_headers(rule)
+                    headers['X-Object-Meta-Rule-Id'] = rule['ID']
+                    break
+
+            if actionList:
+                for action, at_time in actionList.iteritems():
+                    hidden_account = self.hidden_accounts[action]
+                    action_at = at_time
+                    part, nodes = self.container_ring.get_nodes(hidden_account, str(action_at))
+                    action_object = "%s/%s/%s" % (self.account, self.container, self.object)
+                    action_path = '/%s/%s/%s' % (hidden_account, action_at, action_object)
+                    for node in nodes:
+                        ip = node['ip']
+                        port = node['port']
+                        dev = node['device']
+                        action_headers = dict()
+                        action_headers['user-agent'] = 'lifecycle-middleware'
+                        action_headers['X-Timestamp'] = normalize_timestamp(time.time())
+                        action_headers['referer'] = Request(copy(env)).as_referer()
+                        action_headers['x-size'] = '0'
+                        action_headers['x-content-type'] = "text/plain"
+                        action_headers['x-etag'] = 'd41d8cd98f00b204e9800998ecf8427e'
+
+                        conn = http_connect(ip, port, dev, part, "PUT", action_path, action_headers)
+                        response = conn.getresponse()
+                        response.read()
+
+        req = Request(env)
+        for key, value in headers.iteritems():
+            req.headers.__setitem__(key, value)
+        return req.get_response(self.app)
 
 
 class LifecycleManageController(WSGIContext):
-    def __init__(self, app):
+    def __init__(self, app, **kwargs):
         WSGIContext.__init__(self, app)
 
     def GET(self, env, start_response):
@@ -56,7 +173,7 @@ class LifecycleManageController(WSGIContext):
         if status is not HTTP_NO_CONTENT:
             return resp
 
-        if LifeCycle_Sysmeta in resp.headers and resp.headers[LifeCycle_Sysmeta] != 'None':
+        if is_Lifecycle_in_Header(resp.headers):
             lifecycle = resp.headers[LifeCycle_Sysmeta]
 
         else:
@@ -134,7 +251,7 @@ class LifecycleManageController(WSGIContext):
                 return resp
 
             prevLifecycle = None
-            if LifeCycle_Sysmeta in resp.headers and resp.headers[LifeCycle_Sysmeta] != 'None':
+            if is_Lifecycle_in_Header(resp.headers):
                 prevLifecycle = resp.headers[LifeCycle_Sysmeta]
 
             if 'lifecycle' in req.params:
@@ -170,6 +287,7 @@ class LifecycleManageController(WSGIContext):
 
                     prevLifecycle = ast.literal_eval(prevLifecycle)
                     if any(r['ID'] == rule['ID'] for r in prevLifecycle):
+                        # TODO ID 가 같아도, 안의 설정에 따라서 오류, 정상 처리 적용하기
                         message = '<?xml version="1.0" encoding="UTF-8"?>' \
                                   '<Error><Code>InvalidArgument</Code>' \
                                   '<Message>Rule ID must be unique. Found same ID ' \
@@ -235,30 +353,33 @@ class LifecycleManageController(WSGIContext):
 class LifecycleMiddleware(object):
     def __init__(self, app, conf, *args, **kwargs):
         self.app = app
-        self.dapp = app
         self.conf = conf
         self.logger = get_logger(self.conf, log_route='swift3')
 
     def get_controller(self, env, path):
         req = Request(env)
-
-        container, obj = split_path(path, 0, 2, True)
+        version, account, container, obj = split_path(path, 0, 4, True)
+        d = {'container_name': container, 'object_name': unquote(obj) if obj is not None else obj, 'account': account}
 
         if container:
             if 'lifecycle' in req.params or 'lifecycle_rule' in req.params:
-                return LifecycleManageController
-        return None
+                return LifecycleManageController, d
+
+        if container and obj:
+            return ObjectController, d
+
+        return None, d
 
     def __call__(self, env, start_response):
         req = Request(env)
         self.logger.debug('Calling Lifecycle Middleware')
 
-        controller = self.get_controller(env, req.path)
+        controller, path_parts = self.get_controller(env, req.path)
 
         if controller is None:
             return self.app(env, start_response)
 
-        controller = controller(self.app)
+        controller = controller(self.app, **path_parts)
 
         if hasattr(controller, req.method):
             res = getattr(controller, req.method)(env, start_response)

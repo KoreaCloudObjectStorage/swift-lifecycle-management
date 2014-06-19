@@ -3,9 +3,19 @@
 import xml.etree.ElementTree as ET
 import time
 import ast
+import calendar
+from datetime import datetime
 
 from exceptions import LifecycleConfigurationException
+from swift.common.utils import normalize_delete_at_timestamp
 
+LifeCycle_Sysmeta = 'X-Container-Sysmeta-S3-Lifecycle-Configuration'
+LifeCycle_Response_Header = 'X-Lifecycle-Response'
+day_seconds = 86400
+
+outbound_filter = ['X-Object-Meta-Rule-Id',
+                   'X-Object-Meta-Expiration-Last-Modified',
+                   'X-Object-Meta-Transition-Last-Modified']
 
 def xml_to_list(xml):
     root = ET.fromstring(xml)
@@ -79,6 +89,7 @@ def parseAction(action_name, rule):
     if action.find('Date') is not None:
         # 하나의 action에 days와 date가 동시에 설정 시, days로 설정된다.
         if daysSet is False:
+            # TODO Date 가 ISO 8601 Formate 이고 0시로 설정되었는지 검사
             actiondic['Date'] = action.find('Date').text
 
     if action_name == "Transition":
@@ -197,3 +208,39 @@ def dict_to_xml(rule):
 
 def get_status_int(status):
     return int(status.split(' ', 1)[0])
+
+
+def is_Lifecycle_in_Header(headers):
+    if LifeCycle_Sysmeta in headers and headers[LifeCycle_Sysmeta] != 'None':
+        return True
+    return False
+
+
+def get_lifecycle_headers(rule):
+    headers = dict()
+    actionList = dict()
+
+    if 'Expiration' in rule:
+        expiration = rule['Expiration']
+        headers['X-Object-Meta-expiration-last-modified'] = expiration['expiration-last-modified']
+
+        # Date type is ISO 8601
+        if 'Date' in expiration:
+            #Reference : https://gist.github.com/squioc/3078803
+            actionList['expire'] = calendar.timegm(
+                datetime.strptime(expiration['Date'], "%Y-%m-%dT%H:%M:%S+00:00").timetuple())
+        elif 'Days' in expiration:
+            actionList['expire'] =  \
+                normalize_delete_at_timestamp(calc_nextDay(time.time()) + int(expiration['Days']) * day_seconds)
+
+    if 'Transition' in rule:
+        transition = rule['Transition']
+        headers['X-Object-Meta-transition-last-modified'] = transition['transition-last-modified']
+        actionList['transition'] = normalize_delete_at_timestamp(\
+            calc_nextDay(time.time()) + int(transition['Days']) * day_seconds)
+
+    return headers, actionList
+
+
+def calc_nextDay(timestamp):
+    return int(normalize_delete_at_timestamp(int(timestamp) / day_seconds * day_seconds)) + day_seconds
