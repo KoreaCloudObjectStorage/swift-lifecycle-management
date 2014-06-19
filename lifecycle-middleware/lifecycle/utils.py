@@ -15,7 +15,8 @@ day_seconds = 86400
 
 outbound_filter = ['X-Object-Meta-Rule-Id',
                    'X-Object-Meta-Expiration-Last-Modified',
-                   'X-Object-Meta-Transition-Last-Modified']
+                   'X-Object-Meta-Transition-Last-Modified',
+                   'X-Object-Meta-Glacier']
 
 def xml_to_list(xml):
     root = ET.fromstring(xml)

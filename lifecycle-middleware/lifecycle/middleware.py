@@ -11,7 +11,7 @@ from copy import copy
 from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path, normalize_delete_at_timestamp, normalize_timestamp
 from swift.common.wsgi import WSGIContext
-from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK
+from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK, HTTP_FORBIDDEN
 from swift.common.ring import Ring
 from swift.common.bufferedhttp import http_connect
 from exceptions import LifecycleConfigurationException
@@ -57,7 +57,21 @@ class ObjectController(WSGIContext):
         # convert last_modified(UTC TIME) to Unix Timestamp
         last_modified = datetime.strptime(resp.headers['Last-Modified'], '%a, %d %b %Y %H:%M:%S GMT')
         last_modified = calendar.timegm(last_modified.utctimetuple())
-        if rule_id_meta in resp.headers:
+
+
+        # Glacier로 Transition 된 Object 일 경우
+        if 'X-Object-Meta-Glacier' in resp.headers and req.method == 'GET':
+            body = '<Error>\n' \
+                   '<Code>InvalidObjectState</Code>\n' \
+                   '<Message>The operation is not valid for the object\'s storage class</Message>\n' \
+                   '</Error>\n'
+
+            resp.body = body
+            resp.status = HTTP_FORBIDDEN
+            resp.headers[LifeCycle_Response_Header] = True
+
+        # Lifecycle 이 적용된 Object 일 경우
+        elif rule_id_meta in resp.headers:
             rule_id = resp.headers[rule_id_meta]
 
             # GET Lifecycle by rule id
