@@ -111,9 +111,6 @@ class ObjectController(WSGIContext):
     def GET(self, env, start_response):
         return self.GETorHEAD(env, start_response)
 
-    def POST(self, env, start_response):
-        pass
-
     def DELETE(self, env, start_response):
         pass
 
