@@ -2,7 +2,6 @@
 import ast
 import time
 import calendar
-import re
 from datetime import datetime
 from urllib2 import unquote
 from operator import itemgetter
@@ -17,7 +16,7 @@ from swift.common.bufferedhttp import http_connect
 from exceptions import LifecycleConfigurationException
 from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, updateLifecycleMetadata, validationCheck,\
     is_Lifecycle_in_Header, LifeCycle_Sysmeta, LifeCycle_Response_Header, get_lifecycle_headers, calc_nextDay,\
-    day_seconds, outbound_filter
+    day_seconds, lifecycle_filter
 
 
 def get_err_response(err):
@@ -43,19 +42,20 @@ class ObjectController(WSGIContext):
         self.account = account
         self.container = container_name
         self.object = object_name
-        self.hidden_accounts = {'expire': '.s3_expiring_objects', 'transition': '.s3_transitioning_objects'}
+        self.hidden_accounts = {'expiration': '.s3_expiring_objects', 'transition': '.s3_transitioning_objects'}
         self.container_ring = Ring('/etc/swift', ring_name='container')
 
     def GETorHEAD(self, env, start_response):
         req = Request(copy(env))
         resp = req.get_response(self.app)
         status = get_status_int(resp.status)
-        rule_id_meta = 'X-Object-Meta-Rule-Id'
+        headers = resp.headers
+
         if status is not HTTP_OK:
             return resp
 
-        # convert last_modified(UTC TIME) to Unix Timestamp
-        last_modified = datetime.strptime(resp.headers['Last-Modified'], '%a, %d %b %Y %H:%M:%S GMT')
+        # convert object's last_modified(UTC TIME) to Unix Timestamp
+        last_modified = datetime.strptime(headers['Last-Modified'], '%a, %d %b %Y %H:%M:%S GMT')
         last_modified = calendar.timegm(last_modified.utctimetuple())
 
 
@@ -70,11 +70,11 @@ class ObjectController(WSGIContext):
             resp.status = HTTP_FORBIDDEN
             resp.headers[LifeCycle_Response_Header] = True
 
-        # Lifecycle 이 적용된 Object 일 경우
-        elif rule_id_meta in resp.headers:
-            rule_id = resp.headers[rule_id_meta]
+        # 그 이외 처리
+        else:
+            rule_id = resp.headers.get('X-Object-Meta-Rule-Id')
 
-            # GET Lifecycle by rule id
+            # GET Container Lifecycle
             path = "/v1/%s/%s" % (self.account, self.container)
             req = Request(copy(env))
             req.method = "HEAD"
@@ -84,28 +84,87 @@ class ObjectController(WSGIContext):
                 lifecycle = ast.literal_eval(l_resp.headers[LifeCycle_Sysmeta])
             else:
                 return self.app
+            if lifecycle:
+                prefixMap = map(itemgetter('Prefix'), lifecycle)
+                prefixIndex = [prefixMap.index(i) for i in prefixMap if self.object.startswith(i)]
+            else:
+                prefixIndex = list()
 
-            lifecycle = lifecycle[map(itemgetter('ID'), lifecycle).index(rule_id)]
-            if 'Expiration' in lifecycle:
-                expiration = lifecycle['Expiration']
+            container_lifecycle = lifecycle[prefixIndex[0]] if len(prefixIndex) >= 1 else None
+            object_lifecycle = rule_id
+
+            if container_lifecycle:
+                # Container lifecycle에 적용되어 있는 last-modified 값을 가져온다
+                container_timestamp = dict()
+                for key in container_lifecycle:
+                    if key in ('Expiration', 'Transition'):
+                        container_timestamp[key] = container_lifecycle[key][key.lower()+'-last-modified']
+
+                validationFlg = False
+                if object_lifecycle:
+                    validationFlg = True
+                    object_timestamp = dict()
+
+                    for key, value in headers.iteritems():
+                        if key in ('X-Object-Meta-Expiration-Last-Modified',
+                                 'X-Object-Meta-Transition-Last-Modified'):
+                            object_timestamp[key.split('-', 4)[3]] = value
+
+                    for key, value in container_timestamp.iteritems() if validationFlg else {}.iteritems():
+                        if key in object_timestamp:
+                            if value > object_timestamp[key]:
+                                validationFlg = False
+                            elif value == object_timestamp[key]:
+                                validationFlg = True
+                            elif value < object_timestamp[key]:
+                                return Response(status=HTTP_NOT_FOUND)
+
+                # Update object meta to container LC
+                if not validationFlg:
+                    new_header, action_at = get_lifecycle_headers(container_lifecycle, last_modified)
+                    req = Request(copy(env))
+                    req.method = 'POST'
+                    req.headers.update(new_header)
+                    req.get_response(self.app)
+
+                    #Update Hidden Information
+                    for key in container_timestamp:
+                        self.hidden_update(env, hidden={
+                            'account': self.hidden_accounts[key.lower()],
+                            'container': action_at
+                        }, orig={
+                            'account': self.account,
+                            'container': self.container,
+                            'object': self.object
+                        })
+                        #update object's rule_id to container's rule id
+                    rule_id = container_lifecycle['ID']
+            else:
+                if object_lifecycle:
+                    # Object 에서 LC 관련 metadata 삭제
+                    req = Request(copy(env))
+                    req.method = 'POST'
+                    req.headers = lifecycle_filter(copy(resp.headers))
+                    req.get_response(self.app)
+                    rule_id = None
+
+        # Create Response Header
+        if lifecycle and rule_id:
+            object_lifecycle = lifecycle[map(itemgetter('ID'), lifecycle).index(rule_id)]
+
+            if 'Expiration' in object_lifecycle:
+                expiration = object_lifecycle['Expiration']
                 if 'Days' in expiration:
                     expire_at = normalize_delete_at_timestamp(calc_nextDay(last_modified) \
-                                                       + int(expiration['Days'])*day_seconds)
+                                                              + int(expiration['Days']) * day_seconds)
                 elif 'Date' in expiration:
-                    expire_at = calendar.timegm(\
-                        datetime.strptime(expiration['Date'], "%Y-%m-%dT%H:%M:%S+00:00").timetuple())
+                    expire_at = calendar.timegm(datetime.strptime(expiration['Date'],
+                                                                  "%Y-%m-%dT%H:%M:%S+00:00").timetuple())
 
                 expire_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(float(expire_at)))
-                resp.headers['X-Amz-Expiration'] = 'expiry-date="%s", rule-id="%s"' % (expire_date, rule_id)
+                headers['X-Amz-Expiration'] = 'expiry-date="%s", rule-id="%s"' % (expire_date, rule_id)
 
-        # 불필요한 header 제거
-        reg = re.compile('|'.join(outbound_filter), re.IGNORECASE).match
-        removed = filter(reg, resp.headers)
-
-        if removed:
-            for r in removed:
-                resp.headers.pop(r)
-
+        lifecycle_filter(resp.headers)
         return resp
 
     def GET(self, env, start_response):
@@ -135,37 +194,46 @@ class ObjectController(WSGIContext):
             for rule in lifecycle:
                 prefix = rule['Prefix']
                 if self.object.startswith(prefix):
-                    headers, actionList = get_lifecycle_headers(rule)
-                    headers['X-Object-Meta-Rule-Id'] = rule['ID']
+                    headers, actionList = get_lifecycle_headers(rule, time.time())
                     break
 
             if actionList:
                 for action, at_time in actionList.iteritems():
                     hidden_account = self.hidden_accounts[action]
                     action_at = at_time
-                    part, nodes = self.container_ring.get_nodes(hidden_account, str(action_at))
-                    action_object = "%s/%s/%s" % (self.account, self.container, self.object)
-                    action_path = '/%s/%s/%s' % (hidden_account, action_at, action_object)
-                    for node in nodes:
-                        ip = node['ip']
-                        port = node['port']
-                        dev = node['device']
-                        action_headers = dict()
-                        action_headers['user-agent'] = 'lifecycle-middleware'
-                        action_headers['X-Timestamp'] = normalize_timestamp(time.time())
-                        action_headers['referer'] = Request(copy(env)).as_referer()
-                        action_headers['x-size'] = '0'
-                        action_headers['x-content-type'] = "text/plain"
-                        action_headers['x-etag'] = 'd41d8cd98f00b204e9800998ecf8427e'
-
-                        conn = http_connect(ip, port, dev, part, "PUT", action_path, action_headers)
-                        response = conn.getresponse()
-                        response.read()
+                    self.hidden_update(env, hidden=dict({
+                        'account': hidden_account,
+                        'container': action_at
+                    }), orig=dict({
+                        'account': self.account,
+                        'container': self.container,
+                        'object': self.object
+                    }))
 
         req = Request(env)
-        for key, value in headers.iteritems():
-            req.headers.__setitem__(key, value)
+        req.headers.update(headers)
+
         return req.get_response(self.app)
+
+    def hidden_update(self, env, hidden, orig):
+        hidden_obj = '%s/%s/%s' % (orig['account'], orig['container'], orig['object'])
+        hidden_path = '/%s/%s/%s' % (hidden['account'], hidden['container'], hidden_obj)
+        part, nodes = self.container_ring.get_nodes(hidden['account'], str(hidden['container']))
+        for node in nodes:
+            ip = node['ip']
+            port = node['port']
+            dev = node['device']
+            action_headers = dict()
+            action_headers['user-agent'] = 'lifecycle-middleware'
+            action_headers['X-Timestamp'] = normalize_timestamp(time.time())
+            action_headers['referer'] = Request(copy(env)).as_referer()
+            action_headers['x-size'] = '0'
+            action_headers['x-content-type'] = "text/plain"
+            action_headers['x-etag'] = 'd41d8cd98f00b204e9800998ecf8427e'
+
+            conn = http_connect(ip, port, dev, part, "PUT", hidden_path, action_headers)
+            response = conn.getresponse()
+            response.read()
 
 
 class LifecycleManageController(WSGIContext):

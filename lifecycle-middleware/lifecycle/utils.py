@@ -3,6 +3,7 @@
 import xml.etree.ElementTree as ET
 import time
 import ast
+import re
 import calendar
 from datetime import datetime
 
@@ -110,6 +111,7 @@ def normalize_timestamp(timestamp):
 
 def updateLifecycleMetadata(prevLifecycle, currLifecycle):
     prevLifecycle = ast.literal_eval(prevLifecycle)
+    # TODO ID 비교가 아니라 내용비교를 하도록 수정할 것.
     for curr in currLifecycle:
         currId = curr['ID']
 
@@ -217,9 +219,11 @@ def is_Lifecycle_in_Header(headers):
     return False
 
 
-def get_lifecycle_headers(rule):
+def get_lifecycle_headers(rule, current_time):
     headers = dict()
     actionList = dict()
+
+    headers['X-Object-Meta-Rule-Id'] = rule['ID']
 
     if 'Expiration' in rule:
         expiration = rule['Expiration']
@@ -228,20 +232,31 @@ def get_lifecycle_headers(rule):
         # Date type is ISO 8601
         if 'Date' in expiration:
             #Reference : https://gist.github.com/squioc/3078803
-            actionList['expire'] = calendar.timegm(
+            actionList['expiration'] = calendar.timegm(
                 datetime.strptime(expiration['Date'], "%Y-%m-%dT%H:%M:%S+00:00").timetuple())
         elif 'Days' in expiration:
-            actionList['expire'] =  \
-                normalize_delete_at_timestamp(calc_nextDay(time.time()) + int(expiration['Days']) * day_seconds)
+            actionList['expiration'] =  \
+                normalize_delete_at_timestamp(calc_nextDay(current_time) + int(expiration['Days']) * day_seconds)
 
     if 'Transition' in rule:
         transition = rule['Transition']
         headers['X-Object-Meta-transition-last-modified'] = transition['transition-last-modified']
         actionList['transition'] = normalize_delete_at_timestamp(\
-            calc_nextDay(time.time()) + int(transition['Days']) * day_seconds)
+            calc_nextDay(current_time) + int(transition['Days']) * day_seconds)
 
     return headers, actionList
 
 
 def calc_nextDay(timestamp):
     return int(normalize_delete_at_timestamp(int(timestamp) / day_seconds * day_seconds)) + day_seconds
+
+
+def lifecycle_filter(header):
+    reg = re.compile('|'.join(outbound_filter), re.IGNORECASE).match
+    removed = filter(reg, header)
+
+    if removed:
+        for r in removed:
+            header.pop(r)
+
+    return header
