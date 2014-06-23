@@ -123,7 +123,7 @@ class ObjectController(WSGIContext):
 
                 # Update object meta to container LC
                 if not validationFlg:
-                    new_header, action_at = get_lifecycle_headers(container_lifecycle, last_modified)
+                    new_header, actionList = get_lifecycle_headers(container_lifecycle, last_modified)
                     req = Request(copy(env))
                     req.method = 'POST'
                     req.headers.update(new_header)
@@ -133,7 +133,7 @@ class ObjectController(WSGIContext):
                     for key in container_timestamp:
                         self.hidden_update(env, hidden={
                             'account': self.hidden_accounts[key.lower()],
-                            'container': action_at
+                            'container': actionList[key.lower()]
                         }, orig={
                             'account': self.account,
                             'container': self.container,
