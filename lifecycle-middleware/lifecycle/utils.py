@@ -109,21 +109,43 @@ def normalize_timestamp(timestamp):
 
 
 def updateLifecycleMetadata(prevLifecycle, currLifecycle):
-    prevLifecycle = ast.literal_eval(prevLifecycle)
-    # TODO ID 비교가 아니라 내용비교를 하도록 수정할 것.
-    for curr in currLifecycle:
-        currId = curr['ID']
+    '''
+    같은 RULE ID에 대해 내용이 같으면, 이전에 설정된 last-modified 값으로 설정한다.
+    :param prevLifecycle:
+    :param currLifecycle:
+    :return:
+    '''
 
-        for prev in prevLifecycle:
-            prevId = prev['ID']
-            if currId == prevId:
+    prevLifecycle = ast.literal_eval(prevLifecycle)
+    validationFlg = True
+    for prev in prevLifecycle:
+        for curr in currLifecycle:
+            if curr['ID'] != prev['ID']:
+                continue
+
+            for key, value in curr.iteritems():
+                if key not in prev:
+                    validationFlg = False
+                    break
+                elif key in prev and type(value) is dict:
+                    validationFlg = False
+                    if 'Days' in value and 'Days' in prev[key]:
+                        validationFlg = True if value['Days'] == prev[key]['Days'] else False
+                    if 'Date' in value and 'Date' in prev[key]:
+                        validationFlg = True if value['Date'] == prev[key]['Date'] else False
+                    break
+                elif key in prev and prev[key] != value:
+                    validationFlg = False
+                    break
+
+            if validationFlg is True:
                 if 'Transition' in curr.keys() and 'Transition' in prev.keys():
                     curr['Transition']['transition-last-modified'] = str(prev['Transition']['transition-last-modified'])
                     curr['Transition']['transition-propagated'] = str(prev['Transition']['transition-propagated'])
                 if 'Expiration' in curr.keys() and 'Expiration' in prev.keys():
                     curr['Expiration']['expiration-last-modified'] = str(prev['Expiration']['expiration-last-modified'])
                     curr['Expiration']['expiration-propagated'] = str(prev['Expiration']['expiration-propagated'])
-                break
+            validationFlg = True
 
 
 def validationCheck(rulelist):
