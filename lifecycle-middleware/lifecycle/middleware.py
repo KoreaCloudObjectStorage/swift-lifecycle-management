@@ -69,6 +69,8 @@ class ObjectController(WSGIContext):
             resp.body = body
             resp.status = HTTP_FORBIDDEN
             resp.headers[LifeCycle_Response_Header] = True
+            lifecycle_filter(resp.headers)
+            return resp
 
         # 그 이외 처리
         else:
