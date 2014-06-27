@@ -88,7 +88,9 @@ class ObjectExpirer(Daemon):
                 self.swift.get_account_info(self.s3_expiring_objects_account)
             self.logger.info(_('Pass beginning; %s possible containers; %s '
                                'possible objects') % (containers, objects))
-            for c in self.swift.iter_containers(self.s3_expiring_objects_account):
+
+            for c in self.swift.iter_containers(self.
+                                                s3_expiring_objects_account):
                 container = c['name']
                 timestamp = int(container)
                 if timestamp > int(time()):
@@ -246,9 +248,9 @@ class ObjectExpirer(Daemon):
         return lifecycle
 
     def get_object_lifecycle_rule_id(self, obj_path):
-        account, container, object = self.split_object_path(obj_path)
+        account, container, obj = self.split_object_path(obj_path)
 
-        path = '/v1/%s/%s/%s' % (account, container, object)
+        path = '/v1/%s/%s/%s' % (account, container, obj)
         resp = self.swift.make_request('HEAD', path, {}, (2,))
 
         if resp.status_int is HTTP_NOT_FOUND:
