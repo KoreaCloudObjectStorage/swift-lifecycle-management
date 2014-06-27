@@ -25,10 +25,15 @@ Tempauth 를 사용할 경우:
     Change To::
 
         [pipeline:main]
-        pipeline = catch_errors cache swift3 lifecycle tempauth proxy-server
+        pipeline = catch_errors cache swift3 tempauth lifecycle proxy-server
 
 
 3)  proxy-server.conf 의 section에 lifecycle WSGI filter 를 추가한다.
 
     [filter:lifecycle]
     use = egg:lifecycle#lifecycle
+
+주의 사항
+-------
+
+0)  keystone 인증을 사용할 경우, lifecycle middleware를 keystone 뒤에 설정하여야 한다. (keystone을 거쳐야 정상적인 account 값이 설정됨)
