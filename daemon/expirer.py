@@ -1,7 +1,5 @@
 import urllib
 import ast
-import calendar
-from datetime import datetime
 from operator import itemgetter
 from random import random
 from time import time
@@ -17,6 +15,7 @@ from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
 from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT, \
     HTTP_PRECONDITION_FAILED
+
 
 class ObjectExpirer(Daemon):
 
@@ -103,9 +102,7 @@ class ObjectExpirer(Daemon):
                         if obj_process % processes != process:
                             continue
 
-                    pool.spawn_n(
-                        self.delete_object, obj, timestamp,
-                        container, obj)
+                    pool.spawn_n(self.delete_object, obj, container, obj)
             pool.waitall()
             for container in containers_to_delete:
                 try:
@@ -176,26 +173,31 @@ class ObjectExpirer(Daemon):
 
         return processes, process
 
-    def delete_object(self, actual_obj, timestamp, container, obj):
+    def delete_object(self, actual_obj, container, obj):
         start_time = time()
         try:
             # GET Container's Lifecycle
             actual_account, actual_container, actual_object = actual_obj.split('/', 2)
             actual_container_path = '/v1/%s/%s' % (actual_account, actual_container)
+            resp = self.swift.make_request('HEAD', actual_container_path, {}, (2, 4))
 
-            resp = self.swift.make_request('HEAD', actual_container_path, {}, (2,))
-            lifecycle = ast.literal_eval(resp.headers['X-Container-Sysmeta-S3-Lifecycle-Configuration'])
-
-            prefixMap = map(itemgetter('Prefix'), lifecycle)
-            prefixIndex = [prefixMap.index(i) for i in prefixMap if actual_object.startswith(i)]
-            container_lifecycle = lifecycle[prefixIndex[0]] if len(prefixIndex) >= 1 else None
+            if resp.status_int is not HTTP_NOT_FOUND:
+                lifecycle = ast.literal_eval(resp.headers['X-Container-Sysmeta-S3-Lifecycle-Configuration'])
+                prefixMap = map(itemgetter('Prefix'), lifecycle)
+                prefixIndex = [prefixMap.index(i) for i in prefixMap if actual_object.startswith(i)]
+                container_lifecycle = lifecycle[prefixIndex[0]] if len(prefixIndex) >= 1 else None
+            else:
+                container_lifecycle = None
 
             # GET Object Lifecycle
             actual_obj_path = '/v1/%s' % actual_obj
             resp = self.swift.make_request('HEAD', actual_obj_path, {}, (2,))
 
-            object_lifecycle = resp.headers['X-Object-Meta-Rule-Id'] if 'X-Object-Meta-Rule-Id' in resp.headers \
-                                                                    else None
+            if resp.status_int is not HTTP_NOT_FOUND:
+                object_lifecycle = resp.headers[
+                    'X-Object-Meta-Rule-Id'] if 'X-Object-Meta-Rule-Id' in resp.headers else None
+            else:
+                object_lifecycle = None
 
             delete_actual_flg = False
             if container_lifecycle:
@@ -210,7 +212,7 @@ class ObjectExpirer(Daemon):
 
                     for key, value in resp.headers.iteritems():
                         if key in ('X-Object-Meta-Expiration-Last-Modified',
-                                 'X-Object-Meta-Transition-Last-Modified'):
+                                   'X-Object-Meta-Transition-Last-Modified'):
                             object_timestamp[key.split('-', 4)[3]] = value
 
                     for key, value in container_timestamp.iteritems() if validationFlg else {}.iteritems():
@@ -221,7 +223,7 @@ class ObjectExpirer(Daemon):
                                 delete_actual_flg = False
 
             if delete_actual_flg:
-                self.delete_actual_object(actual_obj, timestamp)
+                self.delete_actual_object(actual_obj)
 
             self.swift.delete_object(self.expiring_objects_account,
                                      container, obj)
@@ -235,7 +237,7 @@ class ObjectExpirer(Daemon):
         self.logger.timing_since('timing', start_time)
         self.report()
 
-    def delete_actual_object(self, actual_obj, timestamp):
+    def delete_actual_object(self, actual_obj):
         """
         Deletes the end-user object indicated by the actual object name given
         '<account>/<container>/<object>' if and only if the X-Delete-At value
@@ -243,8 +245,6 @@ class ObjectExpirer(Daemon):
 
         :param actual_obj: The name of the end-user object to delete:
                            '<account>/<container>/<object>'
-        :param timestamp: The timestamp the X-Delete-At value must match to
-                          perform the actual delete.
         """
         path = '/v1/' + urllib.quote(actual_obj.lstrip('/'))
         self.swift.make_request('DELETE', path,
