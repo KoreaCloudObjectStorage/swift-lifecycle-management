@@ -28,7 +28,7 @@ def get_err_response(err):
     """
 
     resp = Response(content_type='text/xml')
-    resp.status = err['status']
+    resp.status = err['code']
     resp.body = """<?xml version="1.0" encoding="UTF-8"?><Error><Code>%s</Code><Message>%s</Message></Error>""" \
                 % (err['code'], err['msg'])
     resp.headers = {LifeCycle_Response_Header: True}
@@ -465,7 +465,7 @@ class LifecycleMiddleware(object):
         if hasattr(controller, req.method):
             res = getattr(controller, req.method)(env, start_response)
         else:
-            return get_err_response('InvalidURI')(env, start_response)
+            return get_err_response({'code': 400, 'msg': 'InvalidURI'})(env, start_response)
 
         return res(env, start_response)
 
