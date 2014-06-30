@@ -15,6 +15,7 @@ OBJECT_LIFECYCLE_NOT_EXIST = 6
 OBJECT_IS_IN_GLACIER = 7
 
 CONTAINER_LIFECYCLE_SYSMETA = 'X-Container-Sysmeta-S3-Lifecycle-Configuration'
+GLACIER_FLAG_META = 'X-Object-Meta-Glacier'
 LIFECYCLE_RESPONSE_HEADER = 'X-Lifecycle-Response'
 
 OBJECT_LIFECYCLE_META = {
@@ -85,12 +86,25 @@ class ObjectLifecycle(object):
                 lifecycle[key.split('-', 5)[4]] = value
         return lifecycle
 
+    def get_status(self):
+        if not self.headers:
+            return None
+
+        if GLACIER_FLAG_META in self.headers:
+            return 'GLACIER'
+        return 'STANDARD'
+
     def __initialize(self):
         resp = self.swift_client.make_request('HEAD', self.path, {}, (2,))
         self.status == resp.status_int
 
         if is_success(self.status):
             self.headers = resp.headers
+
+
+def get_object_status(swift_client, object_path):
+    account, container, obj = object_path.split('/', 2)
+    o_lifecycle = ObjectLifecycle(swift_client, account, container, object)
 
 
 def object_lifecycle_validation(swift_client, object_path):
