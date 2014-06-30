@@ -2,5 +2,5 @@ class LifecycleException(Exception):
     pass
 
 
-class LifecycleConfigurationException(LifecycleException):
+class LifecycleConfigException(LifecycleException):
     pass

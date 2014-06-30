@@ -13,7 +13,7 @@ from swift.common.wsgi import WSGIContext
 from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK, HTTP_FORBIDDEN
 from swift.common.ring import Ring
 from swift.common.bufferedhttp import http_connect
-from exceptions import LifecycleConfigurationException
+from exceptions import LifecycleConfigException
 from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, updateLifecycleMetadata, validationCheck,\
     is_Lifecycle_in_Header, LifeCycle_Sysmeta, LifeCycle_Response_Header, get_lifecycle_headers, calc_nextDay,\
     day_seconds, lifecycle_filter
@@ -29,7 +29,8 @@ def get_err_response(err):
 
     resp = Response(content_type='text/xml')
     resp.status = err['code']
-    resp.body = """<?xml version="1.0" encoding="UTF-8"?><Error><Code>%s</Code><Message>%s</Message></Error>""" \
+    resp.body = """<?xml version="1.0" encoding="UTF-8"?>
+                   <Error><Code>%s</Code><Message>%s</Message></Error>""" \
                 % (err['code'], err['msg'])
     resp.headers = {LifeCycle_Response_Header: True}
     return resp
@@ -42,7 +43,8 @@ class ObjectController(WSGIContext):
         self.account = account
         self.container = container_name
         self.object = object_name
-        self.hidden_accounts = {'expiration': '.s3_expiring_objects', 'transition': '.s3_transitioning_objects'}
+        self.hidden_accounts = {'expiration': '.s3_expiring_objects',
+                                'transition': '.s3_transitioning_objects'}
         self.container_ring = Ring('/etc/swift', ring_name='container')
 
     def GETorHEAD(self, env, start_response):
@@ -55,7 +57,8 @@ class ObjectController(WSGIContext):
             return resp
 
         # convert object's last_modified(UTC TIME) to Unix Timestamp
-        last_modified = datetime.strptime(headers['Last-Modified'], '%a, %d %b %Y %H:%M:%S GMT')
+        last_modified = datetime.strptime(headers['Last-Modified'],
+                                          '%a, %d %b %Y %H:%M:%S GMT')
         last_modified = calendar.timegm(last_modified.utctimetuple())
 
 
@@ -63,9 +66,9 @@ class ObjectController(WSGIContext):
         if 'X-Object-Meta-Glacier' in resp.headers and req.method == 'GET':
             body = '<Error>\n' \
                    '<Code>InvalidObjectState</Code>\n' \
-                   '<Message>The operation is not valid for the object\'s storage class</Message>\n' \
+                   '<Message>The operation is not valid ' \
+                   'for the object\'s storage class</Message>\n' \
                    '</Error>\n'
-
             resp.body = body
             resp.status = HTTP_FORBIDDEN
             resp.headers[LifeCycle_Response_Header] = True
@@ -88,11 +91,15 @@ class ObjectController(WSGIContext):
                 return self.app
             if lifecycle:
                 prefixMap = map(itemgetter('Prefix'), lifecycle)
-                prefixIndex = [prefixMap.index(i) for i in prefixMap if self.object.startswith(i)]
+                prefixIndex = [prefixMap.index(i) for i in prefixMap
+                               if self.object.startswith(i)]
             else:
                 prefixIndex = list()
 
-            container_lifecycle = lifecycle[prefixIndex[0]] if len(prefixIndex) >= 1 else None
+            container_lifecycle = None
+            if len(prefixIndex) >= 1:
+                container_lifecycle = lifecycle[prefixIndex[0]]
+
             object_lifecycle = rule_id
 
             if container_lifecycle:
@@ -100,7 +107,9 @@ class ObjectController(WSGIContext):
                 container_timestamp = dict()
                 for key in container_lifecycle:
                     if key in ('Expiration', 'Transition'):
-                        container_timestamp[key] = container_lifecycle[key][key.lower()+'-last-modified']
+                        container_timestamp[key] = \
+                            container_lifecycle[key][key.lower()+
+                                                     '-last-modified']
 
                 validationFlg = False
                 if object_lifecycle:
@@ -109,10 +118,12 @@ class ObjectController(WSGIContext):
 
                     for key, value in headers.iteritems():
                         if key in ('X-Object-Meta-Expiration-Last-Modified',
-                                 'X-Object-Meta-Transition-Last-Modified'):
+                                   'X-Object-Meta-Transition-Last-Modified'):
                             object_timestamp[key.split('-', 4)[3]] = value
 
-                    for key, value in container_timestamp.iteritems() if validationFlg else {}.iteritems():
+                    for key, value in container_timestamp.iteritems() \
+                                   if validationFlg else {}.iteritems():
+
                         if key in object_timestamp:
                             if value > object_timestamp[key]:
                                 validationFlg = False
@@ -123,7 +134,9 @@ class ObjectController(WSGIContext):
 
                 # Update object meta to container LC
                 if not validationFlg:
-                    new_header, actionList = get_lifecycle_headers(container_lifecycle, last_modified)
+                    new_header, actionList =\
+                        get_lifecycle_headers(container_lifecycle,
+                                              last_modified)
                     req = Request(copy(env))
                     req.method = 'POST'
                     req.headers.update(new_header)
@@ -152,19 +165,25 @@ class ObjectController(WSGIContext):
 
         # Create Response Header
         if lifecycle and rule_id:
-            object_lifecycle = lifecycle[map(itemgetter('ID'), lifecycle).index(rule_id)]
+            object_lifecycle = lifecycle[map(itemgetter('ID'),
+                                             lifecycle).index(rule_id)]
 
             if 'Expiration' in object_lifecycle:
                 expiration = object_lifecycle['Expiration']
                 if 'Days' in expiration:
-                    expire_at = normalize_delete_at_timestamp(calc_nextDay(last_modified) \
-                                                              + int(expiration['Days']) * day_seconds)
+                    expire_time = calc_nextDay(last_modified) + \
+                                  int(expiration['Days']) * day_seconds
+                    expire_at = normalize_delete_at_timestamp(expire_time)
                 elif 'Date' in expiration:
-                    expire_at = calendar.timegm(datetime.strptime(expiration['Date'],
-                                                                  "%Y-%m-%dT%H:%M:%S+00:00").timetuple())
+                    expire_date = datetime.strptime(expiration['Date'],
+                                                    "%Y-%m-%dT%H:%M:%S+00:00")
+                    expire_at = calendar.timegm(expire_date.timetuple())
 
-                expire_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(float(expire_at)))
-                headers['X-Amz-Expiration'] = 'expiry-date="%s", rule-id="%s"' % (expire_date, rule_id)
+                expire_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT",
+                                            time.gmtime(float(expire_at)))
+                headers['X-Amz-Expiration'] = 'expiry-date="%s", ' \
+                                              'rule-id="%s"'% (expire_date,
+                                                               rule_id)
 
         lifecycle_filter(resp.headers)
         return resp
@@ -196,7 +215,8 @@ class ObjectController(WSGIContext):
             for rule in lifecycle:
                 prefix = rule['Prefix']
                 if self.object.startswith(prefix):
-                    headers, actionList = get_lifecycle_headers(rule, time.time())
+                    headers, actionList = get_lifecycle_headers(rule,
+                                                                time.time())
                     break
 
             if actionList:
@@ -218,9 +238,12 @@ class ObjectController(WSGIContext):
         return req.get_response(self.app)
 
     def hidden_update(self, env, hidden, orig):
-        hidden_obj = '%s/%s/%s' % (orig['account'], orig['container'], orig['object'])
-        hidden_path = '/%s/%s/%s' % (hidden['account'], hidden['container'], hidden_obj)
-        part, nodes = self.container_ring.get_nodes(hidden['account'], str(hidden['container']))
+        hidden_obj = '%s/%s/%s' % (orig['account'], orig['container'],
+                                   orig['object'])
+        hidden_path = '/%s/%s/%s' % (hidden['account'], hidden['container'],
+                                     hidden_obj)
+        part, nodes = self.container_ring.get_nodes(hidden['account'],
+                                                    str(hidden['container']))
         for node in nodes:
             ip = node['ip']
             port = node['port']
@@ -233,7 +256,8 @@ class ObjectController(WSGIContext):
             action_headers['x-content-type'] = "text/plain"
             action_headers['x-etag'] = 'd41d8cd98f00b204e9800998ecf8427e'
 
-            conn = http_connect(ip, port, dev, part, "PUT", hidden_path, action_headers)
+            conn = http_connect(ip, port, dev, part, "PUT", hidden_path,
+                                action_headers)
             response = conn.getresponse()
             response.read()
 
@@ -264,7 +288,8 @@ class LifecycleManageController(WSGIContext):
             resp.status = HTTP_NOT_FOUND
             resp.body = '<?xml version="1.0" encoding="UTF-8"?>' \
                         '<Error><Code>NoSuchLifecycleConfiguration</Code>' \
-                        '<Message>The lifecycle configuration does not exist</Message>' \
+                        '<Message>The lifecycle configuration' \
+                        ' does not exist</Message>' \
                         '<BucketName>%s</BucketName></Error>' % container
             resp.headers[LifeCycle_Response_Header] = True
             return resp
@@ -276,13 +301,17 @@ class LifecycleManageController(WSGIContext):
 
         elif 'lifecycle_rule' in req.params:
             try:
-                lifecycle = lifecycle[map(itemgetter('ID'), lifecycle).index(req.params['lifecycle_rule'])]
+                lc_map = map(itemgetter('ID'), lifecycle)
+                index = lc_map.index(req.params['lifecycle_rule'])
+                lifecycle = lifecycle[index]
                 lifecycle = dict_to_xml(lifecycle)
             except Exception as e:
                 # TODO rule 별 조회시 해당 ID가 없을 경우 메세지 내용 알아보기
-                return Response(status=400, body=e.message, headers={LifeCycle_Response_Header: True})
+                return Response(status=400, body=e.message,
+                                headers={LifeCycle_Response_Header: True})
 
-        ret = Response(request=req, body=lifecycle, headers={LifeCycle_Response_Header: True})
+        ret = Response(request=req, body=lifecycle,
+                       headers={LifeCycle_Response_Header: True})
         return ret
 
     def DELETE(self, env, start_response):
@@ -356,11 +385,11 @@ class LifecycleManageController(WSGIContext):
 
             elif 'lifecycle_rule' in req.params:
                 if len(lifecycle) > 1:
-                    exceptionMsg = dict()
-                    exceptionMsg['status'] = 400
-                    exceptionMsg['code'] = 'InvalidRequest'
-                    exceptionMsg['msg'] = 'more than one rule was uploaded'
-                    raise LifecycleConfigurationException(exceptionMsg)
+                    exceptMsg = dict()
+                    exceptMsg['status'] = 400
+                    exceptMsg['code'] = 'InvalidRequest'
+                    exceptMsg['msg'] = 'more than one rule was uploaded'
+                    raise LifecycleConfigException(exceptMsg)
 
                 rule = lifecycle[0]
                 prefix = rule['Prefix']
@@ -371,45 +400,61 @@ class LifecycleManageController(WSGIContext):
                         # TODO ID 가 같아도, 안의 설정에 따라서 오류, 정상 처리 적용하기
                         message = '<?xml version="1.0" encoding="UTF-8"?>' \
                                   '<Error><Code>InvalidArgument</Code>' \
-                                  '<Message>Rule ID must be unique. Found same ID ' \
+                                  '<Message>Rule ID must be unique. ' \
+                                  'Found same ID ' \
                                   'for more than one rule</Message>' \
                                   '<ArgumentValue>%s</ArgumentValue>' \
-                                  '<ArgumentName>ID</ArgumentName>' % rule['ID']
+                                  '<ArgumentName>ID</ArgumentName>' \
+                                  % rule['ID']
                         req.method = 'PUT'
-                        return Response(status=400, body=message, headers={LifeCycle_Response_Header: True})
+                        return Response(status=400, body=message,
+                                        headers={
+                                            LifeCycle_Response_Header: True
+                                        })
 
                     for prev in prevLifecycle:
-                        if prefix.startswith(prev['Prefix']) or prev['Prefix'].startswith(prefix):
-                            if 'Transition' in rule.keys() and 'Transition' in prev.keys():
-                                exceptionMsg = dict()
-                                exceptionMsg['status'] = 400
-                                exceptionMsg['code'] = 'InvalidRequest'
-                                exceptionMsg['msg'] = 'Found overlapping prefixes \'%s\' and \'%s\' ' \
-                                                      'for same action type \'%s\'' \
-                                                      % (prefix, prev['Prefix'], 'Transition')
-                                raise LifecycleConfigurationException(exceptionMsg)
+                        if prefix.startswith(prev['Prefix']) or\
+                           prev['Prefix'].startswith(prefix):
+                            if 'Transition' in rule.keys() and \
+                               'Transition' in prev.keys():
+                                exceptMsg = dict()
+                                exceptMsg['status'] = 400
+                                exceptMsg['code'] = 'InvalidRequest'
+                                exceptMsg['msg'] = \
+                                    'Found overlapping prefixes \'%s\' ' \
+                                    'and \'%s\' for same action type \'%s\'' \
+                                    % (prefix, prev['Prefix'], 'Transition')
+                                raise LifecycleConfigException(exceptMsg)
 
-                            if 'Expiration' in rule.keys() and 'Expiration' in prev.keys():
-                                exceptionMsg = dict()
-                                exceptionMsg['status'] = 400
-                                exceptionMsg['code'] = 'InvalidRequest'
-                                exceptionMsg['msg'] = 'Found overlapping prefixes \'%s\' and \'%s\' ' \
-                                                      'for same action type \'%s\'' \
-                                                      % (prefix, prev['Prefix'], 'Expiration')
-                                raise LifecycleConfigurationException(exceptionMsg)
+                            if 'Expiration' in rule.keys() and \
+                               'Expiration' in prev.keys():
+                                exceptMsg = dict()
+                                exceptMsg['status'] = 400
+                                exceptMsg['code'] = 'InvalidRequest'
+                                exceptMsg['msg'] = 'Found overlapping ' \
+                                                   'prefixes \'%s\' and ' \
+                                                   '\'%s\' for same ' \
+                                                   'action type \'%s\'' \
+                                                   % (prefix,
+                                                      prev['Prefix'],
+                                                      'Expiration')
+                                raise LifecycleConfigException(exceptMsg)
 
-                            if 'Expiration' in (rule.keys() or prev.keys()) and \
+                            if 'Expiration' in (rule.keys() or prev.keys()) \
+                                and \
                                'Transition' in (rule.keys() or prev.keys()):
 
                                 if 'Days' in (rule.keys() or prev.keys()) and \
                                    'Date' in (rule.keys() or prev.keys()):
-                                    exceptionMsg = dict()
-                                    exceptionMsg['status'] = 400
-                                    exceptionMsg['code'] = 'InvalidRequest'
-                                    exceptionMsg['msg'] = 'Found mixed \'Date\' and \'Days\' based Expiration' \
-                                                          ' and Transition actions' \
-                                                          'in lifecycle rule for prefix \'%s\'' % prefix
-                                    raise LifecycleConfigurationException(exceptionMsg)
+                                    exceptMsg = dict()
+                                    exceptMsg['status'] = 400
+                                    exceptMsg['code'] = 'InvalidRequest'
+                                    exceptMsg['msg'] = \
+                                        'Found mixed \'Date\' and \'Days\' ' \
+                                        'based Expiration and Transition ' \
+                                        'actions in lifecycle rule for ' \
+                                        'prefix \'%s\'' % prefix
+                                    raise LifecycleConfigException(exceptMsg)
 
                 else:
                     prevLifecycle = list()
@@ -424,11 +469,12 @@ class LifecycleManageController(WSGIContext):
                 if resp_status is not HTTP_NO_CONTENT:
                     return resp
 
-        except LifecycleConfigurationException as e:
+        except LifecycleConfigException as e:
             env['REQUEST_METHOD'] = 'PUT'
             return get_err_response(e.message)
 
-        return Response(status=200, app_iter='True', headers={LifeCycle_Response_Header: True})
+        return Response(status=200, app_iter='True',
+                        headers={LifeCycle_Response_Header: True})
 
 
 class LifecycleMiddleware(object):
@@ -440,7 +486,9 @@ class LifecycleMiddleware(object):
     def get_controller(self, env, path):
         req = Request(env)
         version, account, container, obj = split_path(path, 0, 4, True)
-        d = {'container_name': container, 'object_name': unquote(obj) if obj is not None else obj, 'account': account}
+        d = {'container_name': container,
+             'object_name': unquote(obj) if obj is not None else obj,
+             'account': account}
 
         if container:
             if 'lifecycle' in req.params or 'lifecycle_rule' in req.params:
@@ -465,7 +513,8 @@ class LifecycleMiddleware(object):
         if hasattr(controller, req.method):
             res = getattr(controller, req.method)(env, start_response)
         else:
-            return get_err_response({'code': 400, 'msg': 'InvalidURI'})(env, start_response)
+            return get_err_response({'code': 400,
+                                     'msg': 'InvalidURI'})(env, start_response)
 
         return res(env, start_response)
 

@@ -7,7 +7,7 @@ import re
 import calendar
 from datetime import datetime
 
-from exceptions import LifecycleConfigurationException
+from exceptions import LifecycleConfigException
 from swift.common.utils import normalize_delete_at_timestamp
 
 LifeCycle_Sysmeta = 'X-Container-Sysmeta-S3-Lifecycle-Configuration'
@@ -28,7 +28,7 @@ def xml_to_list(xml):
         exceptionMsg = dict();
         exceptionMsg['code'] = "OverUploadedRules"
         exceptionMsg['msg'] = "1000"
-        raise LifecycleConfigurationException(exceptionMsg)
+        raise LifecycleConfigException(exceptionMsg)
 
     for rule in rules:
         ruledata = dict()
@@ -62,13 +62,17 @@ def xml_to_list(xml):
             ruledata['Expiration'] = expiration
 
         if expiration and transition:
-            if 'Days' in (expiration or transition) and 'Date' in (expiration and transition):
+            if 'Days' in (expiration or transition) and \
+               'Date' in (expiration and transition):
                 exceptionMsg = dict()
                 exceptionMsg['status'] = 400
                 exceptionMsg['code'] = 'InvalidRequest'
-                exceptionMsg['msg'] = 'Found mixed \'Date\' and \'Days\' based Expiration and Transition actions'\
-                                      'in lifecycle rule for prefix \'%s\'' % prefix
-                raise LifecycleConfigurationException(exceptionMsg)
+                exceptionMsg['msg'] = 'Found mixed \'Date\' and \'Days\' ' \
+                                      'based Expiration and ' \
+                                      'Transition actions'\
+                                      'in lifecycle rule for prefix \'%s\''\
+                                      % prefix
+                raise LifecycleConfigException(exceptionMsg)
 
         rulelist.append(ruledata)
 
@@ -130,9 +134,11 @@ def updateLifecycleMetadata(prevLifecycle, currLifecycle):
                 elif key in prev and type(value) is dict:
                     validationFlg = False
                     if 'Days' in value and 'Days' in prev[key]:
-                        validationFlg = True if value['Days'] == prev[key]['Days'] else False
+                        validationFlg = True if value['Days'] == \
+                                                prev[key]['Days'] else False
                     if 'Date' in value and 'Date' in prev[key]:
-                        validationFlg = True if value['Date'] == prev[key]['Date'] else False
+                        validationFlg = True if value['Date'] == \
+                                                prev[key]['Date'] else False
                     break
                 elif key in prev and prev[key] != value:
                     validationFlg = False
@@ -140,18 +146,23 @@ def updateLifecycleMetadata(prevLifecycle, currLifecycle):
 
             if validationFlg is True:
                 if 'Transition' in curr.keys() and 'Transition' in prev.keys():
-                    curr['Transition']['transition-last-modified'] = str(prev['Transition']['transition-last-modified'])
-                    curr['Transition']['transition-propagated'] = str(prev['Transition']['transition-propagated'])
+                    curr['Transition']['transition-last-modified'] = \
+                        str(prev['Transition']['transition-last-modified'])
+                    curr['Transition']['transition-propagated'] = \
+                        str(prev['Transition']['transition-propagated'])
                 if 'Expiration' in curr.keys() and 'Expiration' in prev.keys():
-                    curr['Expiration']['expiration-last-modified'] = str(prev['Expiration']['expiration-last-modified'])
-                    curr['Expiration']['expiration-propagated'] = str(prev['Expiration']['expiration-propagated'])
+                    curr['Expiration']['expiration-last-modified'] = \
+                        str(prev['Expiration']['expiration-last-modified'])
+                    curr['Expiration']['expiration-propagated'] = \
+                        str(prev['Expiration']['expiration-propagated'])
             validationFlg = True
 
 
 def validationCheck(rulelist):
     """
     [Reference]
-    http://stackoverflow.com/questions/72899/how-do-i-sort-a-list-of-dictionaries-by-values-of-the-dictionary-in-python
+    http://stackoverflow.com/questions/72899/how-do-i-sort-a-list-of-
+    dictionaries-by-values-of-the-dictionary-in-python
     """
     # Prefix를 알파벳 순서대로 정렬
     sortedList = sorted(rulelist, key=lambda k: k['Prefix'].lower())
@@ -168,26 +179,35 @@ def validationCheck(rulelist):
                 exceptionMsg = dict()
                 exceptionMsg['status'] = 400
                 exceptionMsg['code'] = 'InvalidRequest'
-                exceptionMsg['msg'] = 'Found two rules with same prefix \'%s\'' % basePrefix
-                raise LifecycleConfigurationException(exceptionMsg)
+                exceptionMsg['msg'] = 'Found two rules with ' \
+                                      'same prefix \'%s\'' % basePrefix
+                raise LifecycleConfigException(exceptionMsg)
 
             if comparePrefix.startswith(basePrefix):
                 # 같은  action 으로 설정되어있으면 오류! 다르면 건너뜀
-                if 'Transition' in sortedList[i].keys() and 'Transition' in sortedList[j].keys():
+                if 'Transition' in sortedList[i].keys() and \
+                   'Transition' in sortedList[j].keys():
                     exceptionMsg = dict()
                     exceptionMsg['status'] = 400
                     exceptionMsg['code'] = 'InvalidRequest'
-                    exceptionMsg['msg'] = 'Found overlapping prefixes \'%s\' and \'%s\' ' \
-                                          'for same action type \'%s\'' % (basePrefix, comparePrefix, 'Transition')
-                    raise LifecycleConfigurationException(exceptionMsg)
+                    exceptionMsg['msg'] = 'Found overlapping prefixes' \
+                                          ' \'%s\' and \'%s\' ' \
+                                          'for same action type \'%s\''\
+                                          % (basePrefix, comparePrefix,
+                                             'Transition')
+                    raise LifecycleConfigException(exceptionMsg)
 
-                if 'Expiration' in sortedList[i].keys() and 'Expiration' in sortedList[j].keys():
+                if 'Expiration' in sortedList[i].keys() and\
+                   'Expiration' in sortedList[j].keys():
                     exceptionMsg = dict()
                     exceptionMsg['status'] = 400
                     exceptionMsg['code'] = 'InvalidRequest'
-                    exceptionMsg['msg'] = 'Found overlapping prefixes \'%s\' and \'%s\' ' \
-                                          'for same action type \'%s\'' % (basePrefix, comparePrefix, 'Expiration')
-                    raise LifecycleConfigurationException(exceptionMsg)
+                    exceptionMsg['msg'] = 'Found overlapping prefixes' \
+                                          ' \'%s\' and \'%s\' ' \
+                                          'for same action type \'%s\''\
+                                          % (basePrefix, comparePrefix,
+                                             'Expiration')
+                    raise LifecycleConfigException(exceptionMsg)
                 tmpIndex = j
         if tmpIndex:
             tmpIndex += 1
@@ -248,20 +268,25 @@ def get_lifecycle_headers(rule, current_time):
 
     if 'Expiration' in rule:
         expiration = rule['Expiration']
-        headers['X-Object-Meta-expiration-last-modified'] = expiration['expiration-last-modified']
+        headers['X-Object-Meta-expiration-last-modified'] = \
+            expiration['expiration-last-modified']
 
         # Date type is ISO 8601
         if 'Date' in expiration:
             #Reference : https://gist.github.com/squioc/3078803
             actionList['expiration'] = calendar.timegm(
-                datetime.strptime(expiration['Date'], "%Y-%m-%dT%H:%M:%S+00:00").timetuple())
+                datetime.strptime(expiration['Date'],
+                                  "%Y-%m-%dT%H:%M:%S+00:00").timetuple())
         elif 'Days' in expiration:
             actionList['expiration'] =  \
-                normalize_delete_at_timestamp(calc_nextDay(current_time) + int(expiration['Days']) * day_seconds)
+                normalize_delete_at_timestamp(calc_nextDay(current_time) +
+                                              int(expiration['Days']) *
+                                              day_seconds)
 
     if 'Transition' in rule:
         transition = rule['Transition']
-        headers['X-Object-Meta-transition-last-modified'] = transition['transition-last-modified']
+        headers['X-Object-Meta-transition-last-modified'] = \
+            transition['transition-last-modified']
         actionList['transition'] = normalize_delete_at_timestamp(\
             calc_nextDay(current_time) + int(transition['Days']) * day_seconds)
 
@@ -269,7 +294,9 @@ def get_lifecycle_headers(rule, current_time):
 
 
 def calc_nextDay(timestamp):
-    return int(normalize_delete_at_timestamp(int(timestamp) / day_seconds * day_seconds)) + day_seconds
+    current = normalize_delete_at_timestamp(int(timestamp) / day_seconds *
+                                            day_seconds)
+    return int(current) + day_seconds
 
 
 def lifecycle_filter(header):
