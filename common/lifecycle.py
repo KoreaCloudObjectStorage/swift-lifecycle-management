@@ -1,8 +1,9 @@
 import ast
+from copy import copy
 from operator import itemgetter
 
-from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT, \
-    HTTP_PRECONDITION_FAILED, is_success
+from swift.common.http import is_success
+from swift.common.swob import Request
 
 # List of Lifecycle Comparison Result
 LIFECYCLE_OK = 0
@@ -26,8 +27,11 @@ OBJECT_LIFECYCLE_META = {
 
 
 class ContainerLifecycle(object):
-    def __init__(self, swift_client, account, container):
+    def __init__(self, account, container, swift_client=None, env=None,
+                 app=None):
         self.swift_client = swift_client
+        self.env = copy(env)
+        self.app = app
         self.headers = None
         self.path = '/v1/%s/%s' % (account, container)
         self.__initialize()
@@ -60,7 +64,14 @@ class ContainerLifecycle(object):
         return rule_info
 
     def __initialize(self):
-        resp = self.swift_client.make_request('HEAD', self.path, {}, (2, 4))
+        if self.swift_client:
+            resp = self.swift_client.make_request('HEAD', self.path, {},
+                                                  (2, 4))
+        elif self.env:
+            req = Request(self.env)
+            req.method = 'HEAD'
+            resp = req.get_response(self.app)
+
         self.status = resp.status_int
 
         if is_success(self.status):
@@ -68,8 +79,11 @@ class ContainerLifecycle(object):
 
 
 class ObjectLifecycle(object):
-    def __init__(self, swift_client, account, container, object):
+    def __init__(self, account, container, object, swift_client=None,
+                 env=None, app=None):
         self.swift_client = swift_client
+        self.env = copy(env)
+        self.app = app
         self.headers = None
         self.path = '/v1/%s/%s/%s' % (account, container, object)
         self.__initialize()
@@ -95,21 +109,29 @@ class ObjectLifecycle(object):
         return 'STANDARD'
 
     def __initialize(self):
-        resp = self.swift_client.make_request('HEAD', self.path, {}, (2,))
-        self.status == resp.status_int
+        if self.swift_client:
+            resp = self.swift_client.make_request('HEAD', self.path, {}, (2,))
+        elif self.env:
+            req = Request(self.env)
+            req.method = 'HEAD'
+            resp = req.get_response(self.app)
 
         if is_success(self.status):
             self.headers = resp.headers
 
 
 class Object(object):
-    def __init__(self, swift_client, account, container, object):
+    def __init__(self, account, container, object, swift_client=None,
+                 env=None, app=None):
         self.swift_client = swift_client
+        self.env = env
+        self.app = app
         self.account = account
         self.container = container
         self.object = object
-        self.o_lifecycle = ObjectLifecycle(swift_client, account,
-                                           container, object)
+        self.o_lifecycle = ObjectLifecycle(account, container, object,
+                                           swift_client=swift_client,
+                                           env=env, app=app)
         self.c_lifecycle = ContainerLifecycle(swift_client,
                                               account, container)
 
