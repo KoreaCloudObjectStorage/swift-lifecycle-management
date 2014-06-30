@@ -102,38 +102,44 @@ class ObjectLifecycle(object):
             self.headers = resp.headers
 
 
-def get_object_status(swift_client, object_path):
-    account, container, obj = object_path.split('/', 2)
-    o_lifecycle = ObjectLifecycle(swift_client, account, container, object)
+class Object(object):
+    def __init__(self, swift_client, account, container, object):
+        self.swift_client = swift_client
+        self.account = account
+        self.container = container
+        self.object = object
+        self.o_lifecycle = ObjectLifecycle(swift_client, account,
+                                           container, object)
+        self.c_lifecycle = ContainerLifecycle(swift_client,
+                                              account, container)
 
+    def get_object_status(self):
+        return self.o_lifecycle.get_status()
 
-def object_lifecycle_validation(swift_client, object_path):
-    account, container, obj = object_path.split('/', 2)
+    def object_lifecycle_validation(self):
+        if self.c_lifecycle:
+            if self.o_lifecycle:
 
-    c_lifecycle = ContainerLifecycle(swift_client, account, container)
-    o_lifecycle = ObjectLifecycle(swift_client, account, container, object)
+                if self.c_lifecycle == self.o_lifecycle:
+                    return LIFECYCLE_OK
 
-    if c_lifecycle:
-        if o_lifecycle:
+                for key in ('Expiration', 'Transition'):
+                    if (key not in self.c_lifecycle and
+                       key in self .o_lifecycle) or \
+                        (key in self.c_lifecycle and
+                         key not in self.o_lifecycle):
+                        return CONTAINER_LIFECYCLE_IS_UPDATED
 
-            if c_lifecycle == o_lifecycle:
-                return LIFECYCLE_OK
-
-            for key in ('Expiration', 'Transition'):
-                if key not in c_lifecycle and key in o_lifecycle or \
-                   key in c_lifecycle and key not in o_lifecycle:
-                    return CONTAINER_LIFECYCLE_IS_UPDATED
-
-                if c_lifecycle[key] == o_lifecycle[key]:
-                    continue
-                elif c_lifecycle[key] > o_lifecycle[key]:
-                    return CONTAINER_LIFECYCLE_IS_UPDATED
-                elif c_lifecycle[key] < o_lifecycle[key]:
-                    return LIFECYCLE_ERROR
+                    if self.c_lifecycle[key] == self.o_lifecycle[key]:
+                        continue
+                    elif self.c_lifecycle[key] > self.o_lifecycle[key]:
+                        return CONTAINER_LIFECYCLE_IS_UPDATED
+                    elif self.c_lifecycle[key] < self.o_lifecycle[key]:
+                        return LIFECYCLE_ERROR
+            else:
+                return OBJECT_LIFECYCLE_NOT_EXIST
         else:
-            return OBJECT_LIFECYCLE_NOT_EXIST
-    else:
-        if o_lifecycle:
-            return CONTAINER_LIFECYCLE_NOT_EXIST
-        else:
-            return LIFECYCLE_NOT_EXIST
+            if self.o_lifecycle:
+                return CONTAINER_LIFECYCLE_NOT_EXIST
+            else:
+                return LIFECYCLE_NOT_EXIST
