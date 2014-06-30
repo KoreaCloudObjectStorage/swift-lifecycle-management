@@ -51,12 +51,12 @@ class ContainerLifecycle(object):
         return rule_info
 
     def get_rule_by_prefix(self, prefix):
-        if not self.headers and \
-           CONTAINER_LIFECYCLE_SYSMETA not in self.headers:
+        lifecycle = self.get_lifecycle()
+
+        if not lifecycle:
             return None
 
-        rule_list = ast.literal_eval(self.headers[CONTAINER_LIFECYCLE_SYSMETA])
-        prefixMap = map(itemgetter('Prefix'), rule_list)
+        prefixMap = map(itemgetter('Prefix'), lifecycle)
 
         prefixIndex = -1
         for p in prefixMap:
@@ -67,8 +67,15 @@ class ContainerLifecycle(object):
         if prefixIndex < 0:
             return None
 
-        rule = rule_list[prefixIndex]
+        rule = lifecycle[prefixIndex]
         return rule
+
+    def get_lifecycle(self):
+        if not self.headers and \
+           CONTAINER_LIFECYCLE_SYSMETA not in self.headers:
+            return None
+
+        return ast.literal_eval(self.headers[CONTAINER_LIFECYCLE_SYSMETA])
 
     def __initialize(self):
         if self.swift_client:
@@ -95,7 +102,7 @@ class ObjectLifecycle(object):
         self.path = '/v1/%s/%s/%s' % (account, container, object)
         self.__initialize()
 
-    def get_lifecycle(self):
+    def get_object_lifecycle_meta(self):
         if not self.headers and OBJECT_LIFECYCLE_META['id'] in self.headers:
             return None
 
@@ -145,10 +152,21 @@ class Object(object):
     def get_object_status(self):
         return self.o_lifecycle.get_status()
 
+    def get_object_lifecycle(self):
+        lifecycle = self.c_lifecycle.get_lifecycle()
+
+        object_meta = self.o_lifecycle.get_object_lifecycle_meta()
+
+        if not lifecycle or not object_meta:
+            return None
+
+        id = object_meta['ID']
+        return lifecycle[map(itemgetter('ID'), lifecycle).index(id)]
+
     def object_lifecycle_validation(self):
         container = \
             self.c_lifecycle.get_action_timestamp_by_prefix(self.account)
-        object = self.o_lifecycle.get_lifecycle()
+        object = self.o_lifecycle.get_object_lifecycle_meta()
 
         if container:
             if object:
