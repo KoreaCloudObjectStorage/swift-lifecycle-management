@@ -8,15 +8,22 @@ from operator import itemgetter
 from copy import copy
 
 from swift.common.swob import Request, Response
-from swift.common.utils import get_logger, split_path, normalize_delete_at_timestamp, normalize_timestamp
+from swift.common.utils import get_logger, split_path, \
+    normalize_delete_at_timestamp, \
+    normalize_timestamp
 from swift.common.wsgi import WSGIContext
-from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK, HTTP_FORBIDDEN
+from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK, \
+    HTTP_FORBIDDEN
 from swift.common.ring import Ring
 from swift.common.bufferedhttp import http_connect
 from exceptions import LifecycleConfigException
-from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, updateLifecycleMetadata, validationCheck,\
-    is_Lifecycle_in_Header, LifeCycle_Sysmeta, LifeCycle_Response_Header, get_lifecycle_headers, calc_nextDay,\
-    day_seconds, lifecycle_filter
+from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, \
+    updateLifecycleMetadata, validationCheck, is_Lifecycle_in_Header, \
+    get_lifecycle_headers, calc_nextDay, day_seconds
+from common.lifecycle import Object, CONTAINER_LIFECYCLE_NOT_EXIST, \
+    LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
+    CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, LIFECYCLE_OK, \
+    CONTAINER_LIFECYCLE_SYSMETA
 
 
 def get_err_response(err):
@@ -32,7 +39,7 @@ def get_err_response(err):
     resp.body = """<?xml version="1.0" encoding="UTF-8"?>
                    <Error><Code>%s</Code><Message>%s</Message></Error>""" \
                 % (err['code'], err['msg'])
-    resp.headers = {LifeCycle_Response_Header: True}
+    resp.headers = {LIFECYCLE_RESPONSE_HEADER: True}
     return resp
 
 
@@ -48,144 +55,99 @@ class ObjectController(WSGIContext):
         self.container_ring = Ring('/etc/swift', ring_name='container')
 
     def GETorHEAD(self, env, start_response):
-        req = Request(copy(env))
-        resp = req.get_response(self.app)
-        status = get_status_int(resp.status)
-        headers = resp.headers
+        o = Object(self.account, self.container, self.object, env=env,
+                   app=self.app)
 
-        if status is not HTTP_OK:
-            return resp
+        http_status = o.o_lifecycle.get_status()
+        headers = o.o_lifecycle.headers
+        object_status = o.get_object_status()
+
+        if http_status is not HTTP_OK:
+            return Response(status=http_status)
 
         # convert object's last_modified(UTC TIME) to Unix Timestamp
         last_modified = datetime.strptime(headers['Last-Modified'],
                                           '%a, %d %b %Y %H:%M:%S GMT')
         last_modified = calendar.timegm(last_modified.utctimetuple())
 
-
         # Glacier로 Transition 된 Object 일 경우
-        if 'X-Object-Meta-Glacier' in resp.headers and req.method == 'GET':
+        if object_status == 'GLACIER' and env['REQUEST_METHOD'] == 'GET':
             body = '<Error>\n' \
                    '<Code>InvalidObjectState</Code>\n' \
                    '<Message>The operation is not valid ' \
                    'for the object\'s storage class</Message>\n' \
                    '</Error>\n'
+            resp = Response(headers=headers)
             resp.body = body
             resp.status = HTTP_FORBIDDEN
-            resp.headers[LifeCycle_Response_Header] = True
-            lifecycle_filter(resp.headers)
+            resp.headers[LIFECYCLE_RESPONSE_HEADER] = True
             return resp
 
-        # 그 이외 처리
-        else:
-            rule_id = resp.headers.get('X-Object-Meta-Rule-Id')
+        obj_lc_status = o.object_lifecycle_validation()
 
-            # GET Container Lifecycle
-            path = "/v1/%s/%s" % (self.account, self.container)
+        if obj_lc_status == CONTAINER_LIFECYCLE_NOT_EXIST:
+            # Setting Object's Lifecycle to empty
             req = Request(copy(env))
-            req.method = "HEAD"
-            req.path_info = path
-            l_resp = req.get_response(self.app)
-            if get_status_int(l_resp.status) is HTTP_NO_CONTENT:
-                lifecycle = ast.literal_eval(l_resp.headers[LifeCycle_Sysmeta])
-            else:
-                return self.app
-            if lifecycle:
-                prefixMap = map(itemgetter('Prefix'), lifecycle)
-                prefixIndex = [prefixMap.index(i) for i in prefixMap
-                               if self.object.startswith(i)]
-            else:
-                prefixIndex = list()
+            req.method = 'POST'
+            req.headers = headers
+            req.get_response(self.app)
 
-            container_lifecycle = None
-            if len(prefixIndex) >= 1:
-                container_lifecycle = lifecycle[prefixIndex[0]]
+        elif obj_lc_status in (OBJECT_LIFECYCLE_NOT_EXIST,
+                               CONTAINER_LIFECYCLE_IS_UPDATED):
 
-            object_lifecycle = rule_id
+            # Update object meta to container LC
+            new_header, actionList =\
+                get_lifecycle_headers(
+                    o.c_lifecycle.get_rule_by_prefix(self.object),
+                    last_modified)
+            req = Request(copy(env))
+            req.method = 'POST'
+            req.headers.update(new_header)
+            req.get_response(self.app)
 
-            if container_lifecycle:
-                # Container lifecycle에 적용되어 있는 last-modified 값을 가져온다
-                container_timestamp = dict()
-                for key in container_lifecycle:
-                    if key in ('Expiration', 'Transition'):
-                        container_timestamp[key] = \
-                            container_lifecycle[key][key.lower()+
-                                                     '-last-modified']
+            #Update Hidden Information
+            container_timestamp = \
+                o.c_lifecycle.get_action_timestamp_by_prefix(self.account)
 
-                validationFlg = False
-                if object_lifecycle:
-                    validationFlg = True
-                    object_timestamp = dict()
+            for key in container_timestamp:
+                self.hidden_update(env, hidden={
+                    'account': self.hidden_accounts[key.lower()],
+                    'container': actionList[key.lower()]
+                }, orig={
+                    'account': self.account,
+                    'container': self.container,
+                    'object': self.object
+                })
+        elif obj_lc_status == LIFECYCLE_ERROR:
+            return Response(status=HTTP_NOT_FOUND)
 
-                    for key, value in headers.iteritems():
-                        if key in ('X-Object-Meta-Expiration-Last-Modified',
-                                   'X-Object-Meta-Transition-Last-Modified'):
-                            object_timestamp[key.split('-', 4)[3]] = value
+        req = Request(env)
+        resp = req.get_response(self.app)
 
-                    for key, value in container_timestamp.iteritems() \
-                                   if validationFlg else {}.iteritems():
+        if obj_lc_status not in (LIFECYCLE_OK,
+                                 OBJECT_LIFECYCLE_NOT_EXIST,
+                                 CONTAINER_LIFECYCLE_IS_UPDATED):
+            return resp
 
-                        if key in object_timestamp:
-                            if value > object_timestamp[key]:
-                                validationFlg = False
-                            elif value == object_timestamp[key]:
-                                validationFlg = True
-                            elif value < object_timestamp[key]:
-                                return Response(status=HTTP_NOT_FOUND)
+        object_lifecycle = o.get_object_lifecycle()
+        headers = dict()
+        if 'Expiration' in object_lifecycle:
+            expiration = object_lifecycle['Expiration']
+            if 'Days' in expiration:
+                expire_time = calc_nextDay(last_modified) + \
+                              int(expiration['Days']) * day_seconds
+                expire_at = normalize_delete_at_timestamp(expire_time)
+            elif 'Date' in expiration:
+                expire_date = datetime.strptime(expiration['Date'],
+                                                "%Y-%m-%dT%H:%M:%S+00:00")
+                expire_at = calendar.timegm(expire_date.timetuple())
 
-                # Update object meta to container LC
-                if not validationFlg:
-                    new_header, actionList =\
-                        get_lifecycle_headers(container_lifecycle,
-                                              last_modified)
-                    req = Request(copy(env))
-                    req.method = 'POST'
-                    req.headers.update(new_header)
-                    req.get_response(self.app)
-
-                    #Update Hidden Information
-                    for key in container_timestamp:
-                        self.hidden_update(env, hidden={
-                            'account': self.hidden_accounts[key.lower()],
-                            'container': actionList[key.lower()]
-                        }, orig={
-                            'account': self.account,
-                            'container': self.container,
-                            'object': self.object
-                        })
-                        #update object's rule_id to container's rule id
-                    rule_id = container_lifecycle['ID']
-            else:
-                if object_lifecycle:
-                    # Object 에서 LC 관련 metadata 삭제
-                    req = Request(copy(env))
-                    req.method = 'POST'
-                    req.headers = lifecycle_filter(copy(resp.headers))
-                    req.get_response(self.app)
-                    rule_id = None
-
-        # Create Response Header
-        if lifecycle and rule_id:
-            object_lifecycle = lifecycle[map(itemgetter('ID'),
-                                             lifecycle).index(rule_id)]
-
-            if 'Expiration' in object_lifecycle:
-                expiration = object_lifecycle['Expiration']
-                if 'Days' in expiration:
-                    expire_time = calc_nextDay(last_modified) + \
-                                  int(expiration['Days']) * day_seconds
-                    expire_at = normalize_delete_at_timestamp(expire_time)
-                elif 'Date' in expiration:
-                    expire_date = datetime.strptime(expiration['Date'],
-                                                    "%Y-%m-%dT%H:%M:%S+00:00")
-                    expire_at = calendar.timegm(expire_date.timetuple())
-
-                expire_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT",
-                                            time.gmtime(float(expire_at)))
-                headers['X-Amz-Expiration'] = 'expiry-date="%s", ' \
-                                              'rule-id="%s"'% (expire_date,
-                                                               rule_id)
-
-        lifecycle_filter(resp.headers)
+            expire_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT",
+                                        time.gmtime(float(expire_at)))
+            headers['X-Amz-Expiration'] = 'expiry-date="%s", rule-id="%s"' \
+                                          % (expire_date,
+                                             object_lifecycle['ID'])
+        resp.headers.update(headers)
         return resp
 
     def GET(self, env, start_response):
@@ -210,7 +172,7 @@ class ObjectController(WSGIContext):
         headers = dict()
 
         if is_Lifecycle_in_Header(resp.headers):
-            lifecycle = ast.literal_eval(resp.headers[LifeCycle_Sysmeta])
+            lifecycle = ast.literal_eval(resp.headers[CONTAINER_LIFECYCLE_SYSMETA])
 
             for rule in lifecycle:
                 prefix = rule['Prefix']
@@ -279,7 +241,7 @@ class LifecycleManageController(WSGIContext):
             return resp
 
         if is_Lifecycle_in_Header(resp.headers):
-            lifecycle = resp.headers[LifeCycle_Sysmeta]
+            lifecycle = resp.headers[CONTAINER_LIFECYCLE_SYSMETA]
 
         else:
             container, obj = split_path(req.path, 0, 2, True)
@@ -291,7 +253,7 @@ class LifecycleManageController(WSGIContext):
                         '<Message>The lifecycle configuration' \
                         ' does not exist</Message>' \
                         '<BucketName>%s</BucketName></Error>' % container
-            resp.headers[LifeCycle_Response_Header] = True
+            resp.headers[LIFECYCLE_RESPONSE_HEADER] = True
             return resp
 
         lifecycle = ast.literal_eval(lifecycle)
@@ -308,10 +270,10 @@ class LifecycleManageController(WSGIContext):
             except Exception as e:
                 # TODO rule 별 조회시 해당 ID가 없을 경우 메세지 내용 알아보기
                 return Response(status=400, body=e.message,
-                                headers={LifeCycle_Response_Header: True})
+                                headers={LIFECYCLE_RESPONSE_HEADER: True})
 
         ret = Response(request=req, body=lifecycle,
-                       headers={LifeCycle_Response_Header: True})
+                       headers={LIFECYCLE_RESPONSE_HEADER: True})
         return ret
 
     def DELETE(self, env, start_response):
@@ -324,23 +286,23 @@ class LifecycleManageController(WSGIContext):
         if status is not HTTP_NO_CONTENT:
             return resp
 
-        if LifeCycle_Sysmeta in resp.headers:
+        if CONTAINER_LIFECYCLE_SYSMETA in resp.headers:
 
             if 'lifecycle' in req.params:
                 req = Request(copy(env))
                 req.method = 'POST'
-                req.headers[LifeCycle_Sysmeta] = 'None'
+                req.headers[CONTAINER_LIFECYCLE_SYSMETA] = 'None'
                 req.get_response(self.app)
             elif 'lifecycle_rule' in req.params:
                 id = req.params['lifecycle_rule']
-                lifecycle = ast.literal_eval(resp.headers[LifeCycle_Sysmeta])
+                lifecycle = ast.literal_eval(resp.headers[CONTAINER_LIFECYCLE_SYSMETA])
                 newlifecycle = filter(lambda x : x.get('ID') != id, lifecycle)
                 if not newlifecycle:
                     newlifecycle = 'None'
 
                 req = Request(copy(env))
                 req.method = 'POST'
-                req.headers[LifeCycle_Sysmeta] = newlifecycle
+                req.headers[CONTAINER_LIFECYCLE_SYSMETA] = newlifecycle
                 req.get_response(self.app)
 
         return Response(status=HTTP_NO_CONTENT)
@@ -362,7 +324,7 @@ class LifecycleManageController(WSGIContext):
 
             prevLifecycle = None
             if is_Lifecycle_in_Header(resp.headers):
-                prevLifecycle = resp.headers[LifeCycle_Sysmeta]
+                prevLifecycle = resp.headers[CONTAINER_LIFECYCLE_SYSMETA]
 
             if 'lifecycle' in req.params:
 
@@ -375,7 +337,7 @@ class LifecycleManageController(WSGIContext):
                 # 새로운 lifecycle로 변경
                 req = Request(copy(env))
                 req.method = "POST"
-                req.headers[LifeCycle_Sysmeta] = lifecycle
+                req.headers[CONTAINER_LIFECYCLE_SYSMETA] = lifecycle
 
                 resp = req.get_response(self.app)
                 resp_status = get_status_int(resp.status)
@@ -409,7 +371,7 @@ class LifecycleManageController(WSGIContext):
                         req.method = 'PUT'
                         return Response(status=400, body=message,
                                         headers={
-                                            LifeCycle_Response_Header: True
+                                            LIFECYCLE_RESPONSE_HEADER: True
                                         })
 
                     for prev in prevLifecycle:
@@ -462,7 +424,7 @@ class LifecycleManageController(WSGIContext):
                 prevLifecycle.append(rule)
                 req = Request(copy(env))
                 req.method = "POST"
-                req.headers[LifeCycle_Sysmeta] = prevLifecycle
+                req.headers[CONTAINER_LIFECYCLE_SYSMETA] = prevLifecycle
                 resp = req.get_response(self.app)
                 resp_status = get_status_int(resp.status)
 
@@ -474,7 +436,7 @@ class LifecycleManageController(WSGIContext):
             return get_err_response(e.message)
 
         return Response(status=200, app_iter='True',
-                        headers={LifeCycle_Response_Header: True})
+                        headers={LIFECYCLE_RESPONSE_HEADER: True})
 
 
 class LifecycleMiddleware(object):

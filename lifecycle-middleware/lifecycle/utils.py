@@ -6,17 +6,12 @@ import ast
 import re
 import calendar
 from datetime import datetime
+from common.lifecycle import CONTAINER_LIFECYCLE_SYSMETA
 
 from exceptions import LifecycleConfigException
 from swift.common.utils import normalize_delete_at_timestamp
 
-LifeCycle_Sysmeta = 'X-Container-Sysmeta-S3-Lifecycle-Configuration'
-LifeCycle_Response_Header = 'X-Lifecycle-Response'
 day_seconds = 86400
-
-outbound_filter = ['X-Object-Meta-Rule-Id',
-                   'X-Object-Meta-Expiration-Last-Modified',
-                   'X-Object-Meta-Transition-Last-Modified']
 
 def xml_to_list(xml):
     root = ET.fromstring(xml)
@@ -255,7 +250,8 @@ def get_status_int(status):
 
 
 def is_Lifecycle_in_Header(headers):
-    if LifeCycle_Sysmeta in headers and headers[LifeCycle_Sysmeta] != 'None':
+    if CONTAINER_LIFECYCLE_SYSMETA in headers and \
+       headers[CONTAINER_LIFECYCLE_SYSMETA] != 'None':
         return True
     return False
 
@@ -297,14 +293,3 @@ def calc_nextDay(timestamp):
     current = normalize_delete_at_timestamp(int(timestamp) / day_seconds *
                                             day_seconds)
     return int(current) + day_seconds
-
-
-def lifecycle_filter(header):
-    reg = re.compile('|'.join(outbound_filter), re.IGNORECASE).match
-    removed = filter(reg, header)
-
-    if removed:
-        for r in removed:
-            header.pop(r)
-
-    return header
