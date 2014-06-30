@@ -13,8 +13,7 @@ from eventlet.greenpool import GreenPool
 from swift.common.daemon import Daemon
 from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
-from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT, \
-    HTTP_PRECONDITION_FAILED
+from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT
 
 
 class ObjectExpirer(Daemon):
@@ -112,7 +111,7 @@ class ObjectExpirer(Daemon):
             for container in containers_to_delete:
                 try:
                     self.swift.delete_container(
-                        self.expiring_objects_account,
+                        self.s3_expiring_objects_account,
                         container,
                         acceptable_statuses=(2, HTTP_NOT_FOUND, HTTP_CONFLICT))
                 except (Exception, Timeout) as err:
@@ -186,7 +185,7 @@ class ObjectExpirer(Daemon):
             if validation_flg:
                 self.delete_actual_object(obj)
 
-            self.swift.delete_object(self.expiring_objects_account,
+            self.swift.delete_object(self.s3_expiring_objects_account,
                                      container, obj)
             self.report_objects += 1
             self.logger.increment('objects')
