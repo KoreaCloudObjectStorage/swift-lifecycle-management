@@ -36,6 +36,20 @@ class ContainerLifecycle(object):
         self.path = '/v1/%s/%s' % (account, container)
         self.__initialize()
 
+    def get_action_timestamp_by_prefix(self, prefix):
+        rule = self.get_rule_by_prefix(prefix)
+
+        if not rule:
+            return None
+
+        rule_info = dict()
+        rule_info['ID'] = rule['ID']
+        for key in rule:
+            if key in ('Expiration', 'Transition'):
+                rule_info[key] = rule[key][key.lower()+'-last-modified']
+
+        return rule_info
+
     def get_rule_by_prefix(self, prefix):
         if not self.headers and \
            CONTAINER_LIFECYCLE_SYSMETA not in self.headers:
@@ -54,14 +68,7 @@ class ContainerLifecycle(object):
             return None
 
         rule = rule_list[prefixIndex]
-
-        rule_info = dict()
-        rule_info['ID'] = rule['ID']
-        for key in rule:
-            if key in ('Expiration', 'Transition'):
-                rule_info[key] = rule[key][key.lower()+'-last-modified']
-
-        return rule_info
+        return rule
 
     def __initialize(self):
         if self.swift_client:
@@ -139,10 +146,14 @@ class Object(object):
         return self.o_lifecycle.get_status()
 
     def object_lifecycle_validation(self):
-        if self.c_lifecycle:
-            if self.o_lifecycle:
+        container = \
+            self.c_lifecycle.get_action_timestamp_by_prefix(self.account)
+        object = self.o_lifecycle.get_lifecycle()
 
-                if self.c_lifecycle == self.o_lifecycle:
+        if container:
+            if object:
+
+                if container == object:
                     return LIFECYCLE_OK
 
                 for key in ('Expiration', 'Transition'):
@@ -161,7 +172,7 @@ class Object(object):
             else:
                 return OBJECT_LIFECYCLE_NOT_EXIST
         else:
-            if self.o_lifecycle:
+            if object:
                 return CONTAINER_LIFECYCLE_NOT_EXIST
             else:
                 return LIFECYCLE_NOT_EXIST
