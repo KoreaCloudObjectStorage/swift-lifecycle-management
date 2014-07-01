@@ -65,7 +65,7 @@ class TransitionMiddleware(object):
 
         if method == 'POST' and \
            'X-S3-Object-Transition' in req.headers:
-            return self.transition(env)
+            return self.transition(env)(env, start_response)
 
         return self.app(env, start_response)
 
