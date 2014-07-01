@@ -1,10 +1,11 @@
 # coding=utf-8
+import time
 from copy import copy
+
 from swift.common.bufferedhttp import http_connect
 from swift.common.ring import Ring
 from swift.common.swob import Request
 from swift.common.utils import get_logger, split_path, normalize_timestamp
-import time
 from common.lifecycle import GLACIER_FLAG_META
 
 
