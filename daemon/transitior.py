@@ -204,5 +204,6 @@ class ObjectTransitor(Daemon):
 
     def request_transition(self, actual_obj):
         path = '/v1/' + urllib.quote(actual_obj.lstrip('/'))
-        headers = {GLACIER_FLAG_META: True, 'X-Object-Meta-Truncate': True}
+        headers = {GLACIER_FLAG_META: True,
+                   'X-S3-Object-Transition': True}
         self.swift.make_request('POST', path, headers, (2, 4))
