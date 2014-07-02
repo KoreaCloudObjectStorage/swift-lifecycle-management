@@ -58,7 +58,7 @@ class ObjectController(WSGIContext):
         o = Object(self.account, self.container, self.object, env=env,
                    app=self.app)
 
-        http_status = o.o_lifecycle.get_status()
+        http_status = o.o_lifecycle.status
         headers = o.o_lifecycle.headers
         object_status = o.get_object_status()
 

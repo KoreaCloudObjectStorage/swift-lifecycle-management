@@ -84,6 +84,7 @@ class ContainerLifecycle(object):
         elif self.env:
             req = Request(self.env)
             req.method = 'HEAD'
+            req.path_info = self.path
             resp = req.get_response(self.app)
 
         self.status = resp.status_int
@@ -128,7 +129,9 @@ class ObjectLifecycle(object):
         elif self.env:
             req = Request(self.env)
             req.method = 'HEAD'
+            req.path_info = self.path
             resp = req.get_response(self.app)
+            self.status = resp.status_int
 
         if is_success(self.status):
             self.headers = resp.headers
@@ -146,8 +149,9 @@ class Object(object):
         self.o_lifecycle = ObjectLifecycle(account, container, object,
                                            swift_client=swift_client,
                                            env=env, app=app)
-        self.c_lifecycle = ContainerLifecycle(swift_client,
-                                              account, container)
+        self.c_lifecycle = ContainerLifecycle(account, container,
+                                              swift_client=swift_client,
+                                              env=env, app=app)
 
     def get_object_status(self):
         return self.o_lifecycle.get_status()
@@ -165,7 +169,7 @@ class Object(object):
 
     def object_lifecycle_validation(self):
         container = \
-            self.c_lifecycle.get_action_timestamp_by_prefix(self.account)
+            self.c_lifecycle.get_action_timestamp_by_prefix(self.object)
         object = self.o_lifecycle.get_object_lifecycle_meta()
 
         if container:

@@ -7,7 +7,7 @@ import calendar
 from datetime import datetime
 from swift.common.utils import normalize_delete_at_timestamp
 
-from common.lifecycle import CONTAINER_LIFECYCLE_SYSMETA
+from common.lifecycle import CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META
 from exceptions import LifecycleConfigException
 
 
@@ -260,11 +260,11 @@ def get_lifecycle_headers(rule, current_time):
     headers = dict()
     actionList = dict()
 
-    headers['X-Object-Meta-Rule-Id'] = rule['ID']
+    headers[OBJECT_LIFECYCLE_META['id']] = rule['ID']
 
     if 'Expiration' in rule:
         expiration = rule['Expiration']
-        headers['X-Object-Meta-expiration-last-modified'] = \
+        headers[OBJECT_LIFECYCLE_META['expire-last']] = \
             expiration['expiration-last-modified']
 
         # Date type is ISO 8601
@@ -281,7 +281,7 @@ def get_lifecycle_headers(rule, current_time):
 
     if 'Transition' in rule:
         transition = rule['Transition']
-        headers['X-Object-Meta-transition-last-modified'] = \
+        headers[OBJECT_LIFECYCLE_META['transition-last']] = \
             transition['transition-last-modified']
         actionList['transition'] = normalize_delete_at_timestamp(\
             calc_nextDay(current_time) + int(transition['Days']) * day_seconds)
