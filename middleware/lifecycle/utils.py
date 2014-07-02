@@ -3,13 +3,13 @@
 import xml.etree.ElementTree as ET
 import time
 import ast
-import re
 import calendar
 from datetime import datetime
-from common.lifecycle import CONTAINER_LIFECYCLE_SYSMETA
-
-from exceptions import LifecycleConfigException
 from swift.common.utils import normalize_delete_at_timestamp
+
+from common.lifecycle import CONTAINER_LIFECYCLE_SYSMETA
+from exceptions import LifecycleConfigException
+
 
 day_seconds = 86400
 

@@ -211,7 +211,7 @@ class ObjectController(WSGIContext):
             port = node['port']
             dev = node['device']
             action_headers = dict()
-            action_headers['user-agent'] = 'lifecycle-middleware'
+            action_headers['user-agent'] = 'lifecycle'
             action_headers['X-Timestamp'] = normalize_timestamp(time.time())
             action_headers['referer'] = Request(copy(env)).as_referer()
             action_headers['x-size'] = '0'
