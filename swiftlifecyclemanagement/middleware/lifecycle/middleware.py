@@ -94,7 +94,6 @@ class ObjectController(WSGIContext):
 
         elif obj_lc_status in (OBJECT_LIFECYCLE_NOT_EXIST,
                                CONTAINER_LIFECYCLE_IS_UPDATED):
-
             # Update object meta to container LC
             new_header, actionList =\
                 get_lifecycle_headers(
@@ -107,7 +106,8 @@ class ObjectController(WSGIContext):
 
             #Update Hidden Information
             container_timestamp = \
-                o.c_lifecycle.get_action_timestamp_by_prefix(self.account)
+                o.c_lifecycle.get_action_timestamp_by_prefix(self.object)
+            del container_timestamp['ID']
 
             for key in container_timestamp:
                 self.hidden_update(env, hidden={
@@ -129,6 +129,7 @@ class ObjectController(WSGIContext):
                                  CONTAINER_LIFECYCLE_IS_UPDATED):
             return resp
 
+        o.reload()
         object_lifecycle = o.get_object_lifecycle()
         headers = dict()
         if 'Expiration' in object_lifecycle:

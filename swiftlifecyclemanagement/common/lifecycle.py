@@ -71,7 +71,7 @@ class ContainerLifecycle(object):
         return rule
 
     def get_lifecycle(self):
-        if not self.headers and \
+        if not self.headers or \
            CONTAINER_LIFECYCLE_SYSMETA not in self.headers:
             return None
 
@@ -92,6 +92,9 @@ class ContainerLifecycle(object):
         if is_success(self.status):
             self.headers = resp.headers
 
+    def reload(self):
+        self.__initialize()
+
 
 class ObjectLifecycle(object):
     def __init__(self, account, container, object, swift_client=None,
@@ -104,7 +107,8 @@ class ObjectLifecycle(object):
         self.__initialize()
 
     def get_object_lifecycle_meta(self):
-        if not self.headers and OBJECT_LIFECYCLE_META['id'] in self.headers:
+        if not self.headers or \
+           OBJECT_LIFECYCLE_META['id'] not in self.headers:
             return None
 
         lifecycle = dict()
@@ -136,6 +140,9 @@ class ObjectLifecycle(object):
 
         if is_success(self.status):
             self.headers = resp.headers
+
+    def reload(self):
+        self.__initialize()
 
 
 class Object(object):
@@ -175,7 +182,6 @@ class Object(object):
 
         if container:
             if object:
-
                 if container == object:
                     return LIFECYCLE_OK
 
@@ -199,3 +205,7 @@ class Object(object):
                 return CONTAINER_LIFECYCLE_NOT_EXIST
             else:
                 return LIFECYCLE_NOT_EXIST
+
+    def reload(self):
+        self.o_lifecycle.reload()
+        self.c_lifecycle.reload()
