@@ -131,7 +131,8 @@ class ObjectLifecycle(object):
             req.method = 'HEAD'
             req.path_info = self.path
             resp = req.get_response(self.app)
-            self.status = resp.status_int
+
+        self.status = resp.status_int
 
         if is_success(self.status):
             self.headers = resp.headers
