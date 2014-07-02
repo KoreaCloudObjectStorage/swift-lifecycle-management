@@ -225,8 +225,12 @@ class ObjectController(WSGIContext):
 
 
 class LifecycleManageController(WSGIContext):
-    def __init__(self, app, **kwargs):
+    def __init__(self, app, account, container_name, **kwargs):
         WSGIContext.__init__(self, app)
+        self.s3_accounts = '.s3_accounts'
+        self.container_ring = Ring('/etc/swift', ring_name='container')
+        self.account = account
+        self.container = container_name
 
     def GET(self, env, start_response):
         req = Request(env)
@@ -434,9 +438,30 @@ class LifecycleManageController(WSGIContext):
         except LifecycleConfigException as e:
             env['REQUEST_METHOD'] = 'PUT'
             return get_err_response(e.message)
-
+        self.update_hidden_s3_account(self.account, self.container)
         return Response(status=200, app_iter='True',
                         headers={LIFECYCLE_RESPONSE_HEADER: True})
+
+    def update_hidden_s3_account(self, account, container):
+        path = '/%s/%s/%s' % (self.s3_accounts, account, container)
+        parts, nodes = self.container_ring.get_nodes(self.s3_accounts,
+                                                     account)
+        for node in nodes:
+            ip = node['ip']
+            port = node['port']
+            dev = node['device']
+            action_headers = dict()
+            action_headers['user-agent'] = 'lifecycle'
+            action_headers['X-Timestamp'] = normalize_timestamp(time.time())
+            action_headers['referer'] = 'Lifecycle Middleware'
+            action_headers['x-size'] = '0'
+            action_headers['x-content-type'] = "text/plain"
+            action_headers['x-etag'] = 'd41d8cd98f00b204e9800998ecf8427e'
+
+            conn = http_connect(ip, port, dev, parts, 'PUT', path,
+                                action_headers)
+            response = conn.getresponse()
+            response.read()
 
 
 class LifecycleMiddleware(object):
