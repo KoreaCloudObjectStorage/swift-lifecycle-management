@@ -20,7 +20,7 @@ from exceptions import LifecycleConfigException
 from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, \
     updateLifecycleMetadata, validationCheck, is_Lifecycle_in_Header, \
     get_lifecycle_headers, calc_nextDay, day_seconds
-from common.lifecycle import Object, CONTAINER_LIFECYCLE_NOT_EXIST, \
+from swiftlifecyclemanagement.common.lifecycle import Object, CONTAINER_LIFECYCLE_NOT_EXIST, \
     LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
     CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, LIFECYCLE_OK, \
     CONTAINER_LIFECYCLE_SYSMETA

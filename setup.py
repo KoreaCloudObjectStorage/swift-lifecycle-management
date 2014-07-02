@@ -1,11 +1,11 @@
 from setuptools import setup
 
-from middleware import lifecycle
+import swiftlifecyclemanagement
 
 setup(
-    name='lifecycle',
-    version=lifecycle.version,
-    packages=['middleware.lifecycle', 'common'],
+    name='swiftlifecyclemanagement',
+    version=swiftlifecyclemanagement.version,
+    packages=['swiftlifecyclemanagement', 'swiftlifecyclemanagement.middleware', 'swiftlifecyclemanagement.middleware.lifecycle', 'swiftlifecyclemanagement.common'],
     url='http://a2company.co.kr',
     license='',
     author='nexusz99',
@@ -13,6 +13,5 @@ setup(
     description='Swift Lifecycle Manamgment Middleware',
     requires=['swift(>=1.4)'],
     entry_points={'paste.filter_factory':
-                        ['lifecycle=middleware.lifecycle'
-                         '.middleware:filter_factory']}
+                        ['swiftlifecyclemanagement=swiftlifecyclemanagement.middleware.lifecycle.middleware:filter_factory']}
 )

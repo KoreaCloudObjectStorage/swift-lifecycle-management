@@ -7,7 +7,7 @@ import calendar
 from datetime import datetime
 from swift.common.utils import normalize_delete_at_timestamp
 
-from common.lifecycle import CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META
+from swiftlifecyclemanagement.common.lifecycle import CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META
 from exceptions import LifecycleConfigException
 
 
