@@ -12,7 +12,8 @@ from swift.common.utils import get_logger, dump_recon_cache
 from time import time
 import urllib
 from swiftlifecyclemanagement.common.lifecycle import Object, LIFECYCLE_OK, \
-    GLACIER_FLAG_META
+    GLACIER_FLAG_META, calc_when_actions_do
+from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
 
 
 class ObjectTransitor(Daemon):
@@ -185,10 +186,16 @@ class ObjectTransitor(Daemon):
             o = Object(obj_account, obj_container, obj_object,
                        swift_client=self.swift)
 
-            object_status = o.object_lifecycle_validation()
+            object_header = o.o_lifecycle.headers
+            object_rule = o.get_object_lifecycle()
+            last_modified = gmt_to_timestamp(object_header['Last-Modified'])
 
-            if object_status is LIFECYCLE_OK:
-                self.request_transition(obj)
+            validation_flg = o.object_lifecycle_validation()
+            if validation_flg == LIFECYCLE_OK:
+                times = calc_when_actions_do(object_rule, last_modified)
+                actual_expire_time = int(times['Transition'])
+                if actual_expire_time == int(container):
+                    self.request_transition(obj)
 
             self.swift.delete_object(self.s3_transition_objects_account,
                                      container, obj)
