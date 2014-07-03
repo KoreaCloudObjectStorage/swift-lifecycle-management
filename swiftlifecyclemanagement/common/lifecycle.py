@@ -135,7 +135,8 @@ class ObjectLifecycle(object):
 
     def __initialize(self):
         if self.swift_client:
-            resp = self.swift_client.make_request('HEAD', self.path, {}, (2,))
+            resp = self.swift_client.make_request('HEAD', self.path, {},
+                                                  (2, 4))
         elif self.env:
             req = Request(self.env)
             req.method = 'HEAD'
