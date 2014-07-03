@@ -182,21 +182,24 @@ class Object(object):
 
         if container:
             if object:
-                if container == object:
-                    return LIFECYCLE_OK
+                #if container == object:
+                #    return LIFECYCLE_OK
 
                 for key in ('Expiration', 'Transition'):
-                    if (key not in self.c_lifecycle and
-                       key in self .o_lifecycle) or \
-                        (key in self.c_lifecycle and
-                         key not in self.o_lifecycle):
+                    if (key not in container and
+                       key in object) or \
+                        (key in container and
+                         key not in object):
                         return CONTAINER_LIFECYCLE_IS_UPDATED
 
-                    if self.c_lifecycle[key] == self.o_lifecycle[key]:
+                    elif key not in container and key not in object:
                         continue
-                    elif self.c_lifecycle[key] > self.o_lifecycle[key]:
+
+                    if container[key] == object[key]:
+                        continue
+                    elif container[key] > object[key]:
                         return CONTAINER_LIFECYCLE_IS_UPDATED
-                    elif self.c_lifecycle[key] < self.o_lifecycle[key]:
+                    elif container[key] < object[key]:
                         return LIFECYCLE_ERROR
             else:
                 return OBJECT_LIFECYCLE_NOT_EXIST
