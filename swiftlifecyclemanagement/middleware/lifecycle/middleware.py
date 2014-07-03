@@ -1,26 +1,24 @@
 # coding=utf-8
 import ast
 import time
-import calendar
-from datetime import datetime
 from urllib2 import unquote
 from operator import itemgetter
 from copy import copy
 
 from swift.common.swob import Request, Response
-from swift.common.utils import get_logger, split_path, \
-    normalize_delete_at_timestamp, \
-    normalize_timestamp
+from swift.common.utils import get_logger, split_path, normalize_timestamp
 from swift.common.wsgi import WSGIContext
 from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK, \
     HTTP_FORBIDDEN
 from swift.common.ring import Ring
 from swift.common.bufferedhttp import http_connect
 from exceptions import LifecycleConfigException
+from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
 from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, \
     updateLifecycleMetadata, validationCheck, is_lifecycle_in_header, \
-    make_object_metadata_from_rule, calc_nextDay, day_seconds
-from swiftlifecyclemanagement.common.lifecycle import Object, CONTAINER_LIFECYCLE_NOT_EXIST, \
+    make_object_metadata_from_rule
+from swiftlifecyclemanagement.common.lifecycle import Object,\
+    CONTAINER_LIFECYCLE_NOT_EXIST, \
     LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
     CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, LIFECYCLE_OK, \
     CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do
@@ -65,10 +63,7 @@ class ObjectController(WSGIContext):
         if http_status is not HTTP_OK:
             return Response(status=http_status)
 
-        # convert object's last_modified(UTC TIME) to Unix Timestamp
-        last_modified = datetime.strptime(headers['Last-Modified'],
-                                          '%a, %d %b %Y %H:%M:%S GMT')
-        last_modified = calendar.timegm(last_modified.utctimetuple())
+        last_modified = gmt_to_timestamp(headers['Last-Modified'])
 
         # Glacier로 Transition 된 Object 일 경우
         if object_status == 'GLACIER' and env['REQUEST_METHOD'] == 'GET':
