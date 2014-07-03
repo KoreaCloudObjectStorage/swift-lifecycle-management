@@ -14,7 +14,7 @@ from swift.common.utils import get_logger, dump_recon_cache
 from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT
 
 from swiftlifecyclemanagement.common.lifecycle import \
-    CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META
+    CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META, Object, LIFECYCLE_OK
 
 
 class ObjectExpirer(Daemon):
@@ -181,9 +181,11 @@ class ObjectExpirer(Daemon):
     def delete_object(self, container, obj):
         start_time = time()
         try:
-            validation_flg = self.validate_object_lifecycle(obj)
+            account, container, object = self.split_object_path(obj)
+            o = Object(account, container, object, swift_client=self.swift)
+            validation_flg = o.object_lifecycle_validation()
 
-            if validation_flg:
+            if validation_flg == LIFECYCLE_OK:
                 self.delete_actual_object(obj)
 
             self.swift.delete_object(self.s3_expiring_objects_account,
@@ -211,86 +213,5 @@ class ObjectExpirer(Daemon):
         self.swift.make_request('DELETE', path,
                                 {}, (2, HTTP_NOT_FOUND))
 
-    def get_container_lifecycle(self, obj_path):
-        account, container, prefix = self.split_object_path(obj_path)
-
-        path = '/v1/%s/%s' % (account, container)
-        resp = self.swift.make_request('HEAD', path, {}, (2, 4))
-
-        if resp.status_int is HTTP_NOT_FOUND:
-            return None
-
-        if CONTAINER_LIFECYCLE_SYSMETA not in resp.headers:
-            return None
-
-        rule_list = ast.literal_eval(resp.headers[CONTAINER_LIFECYCLE_SYSMETA])
-        prefixMap = map(itemgetter('Prefix'), rule_list)
-
-        prefixIndex = -1
-        for p in prefixMap:
-            if prefix.startswith(p):
-                prefixIndex = prefixMap.index(p)
-                break
-
-        if prefixIndex < 0:
-            return None
-
-        rule = rule_list[prefixIndex]
-
-        lifecycle = dict()
-        lifecycle['ID'] = rule['ID']
-        for key in rule:
-            if key in ('Expiration', 'Transition'):
-                lifecycle[key] = rule[key][key.lower()+'-last-modified']
-
-        return lifecycle
-
-    def get_object_lifecycle_rule_id(self, obj_path):
-        account, container, obj = self.split_object_path(obj_path)
-
-        path = '/v1/%s/%s/%s' % (account, container, obj)
-        resp = self.swift.make_request('HEAD', path, {}, (2,))
-
-        if resp.status_int is HTTP_NOT_FOUND:
-            return None
-
-        if OBJECT_LIFECYCLE_META['id'] not in resp.headers:
-            return None
-
-        lifecycle = dict()
-        lifecycle['ID'] = resp.headers[OBJECT_LIFECYCLE_META['id']]
-        for key, value in resp.headers.iteritems():
-            if key in (OBJECT_LIFECYCLE_META['transition-last'],
-                       OBJECT_LIFECYCLE_META['expire-last']):
-                lifecycle[key.split('-', 5)[4]] = value
-
-        return lifecycle
-
     def split_object_path(self, obj_path):
         return obj_path.split('/', 2)
-
-    def validate_object_lifecycle(self, obj):
-        # GET Container's Lifecycle
-        container_lifecycle = self.get_container_lifecycle(obj)
-
-        if not container_lifecycle:
-            return False
-
-        # GET Object Lifecycle
-        object_lifecycle = self.get_object_lifecycle_rule_id(obj)
-
-        delete_actual_flg = False
-        if not object_lifecycle:
-            return False
-
-        for key in ('Expiration', 'Transition'):
-            if key not in object_lifecycle and \
-               key not in container_lifecycle:
-                return False
-
-            if container_lifecycle[key] == object_lifecycle[key]:
-                delete_actual_flg = True
-            else:
-                delete_actual_flg = False
-
-        return delete_actual_flg
