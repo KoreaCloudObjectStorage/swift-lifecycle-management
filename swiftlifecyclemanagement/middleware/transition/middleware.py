@@ -1,12 +1,14 @@
 # coding=utf-8
+from swift.common.http import HTTP_NO_CONTENT
+from swift.common.request_helpers import is_user_meta
 import time
 from copy import copy
 
 from swift.common.bufferedhttp import http_connect
 from swift.common.ring import Ring
-from swift.common.swob import Request
+from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path, normalize_timestamp
-from common.lifecycle import GLACIER_FLAG_META
+from swiftlifecyclemanagement.common.lifecycle import GLACIER_FLAG_META
 
 
 class TransitionMiddleware(object):
@@ -16,29 +18,33 @@ class TransitionMiddleware(object):
         self.logger = get_logger(self.conf, log_route='transition')
         self.container_ring = Ring('/etc/swift', ring_name='container')
         self.glacier_account_prefix = '.glacier_'
+        self.s3_user_meta_prefix = 'X-Object-Meta-S3-'
 
     def transition(self, env):
         # GET Object body
         req = Request(copy(env))
         req.method = 'GET'
         resp = req.get_response(self.app)
-        # TODO 헤더에서 User-Metadata만 가져올 것
-        obj_header = resp.headers
+        # 헤더에서 User-Metadata만 가져온다.
+        obj_user_meta = {}
+        obj_user_meta.update(val for val in resp.headers.iteritems()
+                             if is_user_meta('object', val[0]) and
+                             val[0].startswith(self.s3_user_meta_prefix))
         obj_body = resp.body
 
         # TODO Glacier로 업로드
         glacier_obj = '%s/%s/%s' % (self.account, self.container, self.obj)
 
-        # Object를 0KB로 만들기
+        # Object를 user metadata를 유지하면서 0KB로 만들기
         req = Request(copy(env))
         req.headers[GLACIER_FLAG_META] = True
+        req.headers.update(obj_user_meta)
         resp = req.get_response(self.app)
 
         # Glacier Hidden account에 기록
         glacier_account = self.glacier_account_prefix + self.account
         part, nodes = self.container_ring.get_nodes(glacier_account,
                                                     self.container)
-
         for node in nodes:
             ip = node['ip']
             port = node['port']
@@ -54,6 +60,7 @@ class TransitionMiddleware(object):
             conn = http_connect(ip, port, dev, part, 'PUT', glacier_obj,
                                 headers)
             conn.getresponse().read()
+        return Response(status=HTTP_NO_CONTENT)
 
     def __call__(self, env, start_response):
         req = Request(env)
