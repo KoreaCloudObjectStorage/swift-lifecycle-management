@@ -249,7 +249,7 @@ def get_status_int(status):
     return int(status.split(' ', 1)[0])
 
 
-def is_Lifecycle_in_Header(headers):
+def is_lifecycle_in_header(headers):
     if CONTAINER_LIFECYCLE_SYSMETA in headers and \
        headers[CONTAINER_LIFECYCLE_SYSMETA] != 'None':
         return True

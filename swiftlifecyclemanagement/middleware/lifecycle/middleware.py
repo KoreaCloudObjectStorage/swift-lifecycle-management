@@ -18,7 +18,7 @@ from swift.common.ring import Ring
 from swift.common.bufferedhttp import http_connect
 from exceptions import LifecycleConfigException
 from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, \
-    updateLifecycleMetadata, validationCheck, is_Lifecycle_in_Header, \
+    updateLifecycleMetadata, validationCheck, is_lifecycle_in_header, \
     make_object_metadata_from_rule, calc_nextDay, day_seconds
 from swiftlifecyclemanagement.common.lifecycle import Object, CONTAINER_LIFECYCLE_NOT_EXIST, \
     LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
@@ -129,7 +129,8 @@ class ObjectController(WSGIContext):
         o.reload()
         object_lifecycle = o.get_object_lifecycle()
         if 'Expiration' in object_lifecycle:
-            expire_at = calc_when_actions_do(object_lifecycle, last_modified)
+            actions = calc_when_actions_do(object_lifecycle, last_modified)
+            expire_at = actions['Expiration']
             expire_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT",
                                         time.gmtime(float(expire_at)))
             resp.headers['X-Amz-Expiration'] = 'expiry-date="%s",' \
@@ -151,40 +152,42 @@ class ObjectController(WSGIContext):
         req = Request(copy(env))
         req.method = 'HEAD'
         req.path_info = '/v1/%s/%s' % (self.account, self.container)
-        resp = req.get_response(self.app)
-        status = get_status_int(resp.status)
+        container = req.get_response(self.app)
+        status = get_status_int(container.status)
         if status is not HTTP_NO_CONTENT:
-            return resp
+            return container
 
         actionList = dict()
         headers = dict()
 
-        if is_Lifecycle_in_Header(resp.headers):
-            lifecycle = ast.literal_eval(resp.headers[CONTAINER_LIFECYCLE_SYSMETA])
+        if not is_lifecycle_in_header(container.headers):
+            return self.app
 
-            for rule in lifecycle:
-                prefix = rule['Prefix']
-                if self.object.startswith(prefix):
-                    headers = make_object_metadata_from_rule(rule)
-                    actionList = calc_when_actions_do(rule, time.time())
-                    break
+        lifecycle = container.headers[CONTAINER_LIFECYCLE_SYSMETA]
+        lifecycle = ast.literal_eval(lifecycle)
 
-            if actionList:
-                for action, at_time in actionList.iteritems():
-                    hidden_account = self.hidden_accounts[action]
-                    action_at = at_time
-                    self.hidden_update(env, hidden=dict({
-                        'account': hidden_account,
-                        'container': action_at
-                    }), orig=dict({
-                        'account': self.account,
-                        'container': self.container,
-                        'object': self.object
-                    }))
+        for rule in lifecycle:
+            prefix = rule['Prefix']
+            if self.object.startswith(prefix):
+                headers = make_object_metadata_from_rule(rule)
+                actionList = calc_when_actions_do(rule, time.time())
+                break
+
+        if actionList:
+            for action, at_time in actionList.iteritems():
+                hidden_account = self.hidden_accounts[action.lower()]
+                action_at = at_time
+                self.hidden_update(env, hidden=dict({
+                    'account': hidden_account,
+                    'container': action_at
+                }), orig=dict({
+                    'account': self.account,
+                    'container': self.container,
+                    'object': self.object
+                }))
 
         req = Request(env)
         req.headers.update(headers)
-
         return req.get_response(self.app)
 
     def hidden_update(self, env, hidden, orig):
@@ -228,7 +231,7 @@ class LifecycleManageController(WSGIContext):
         if status is not HTTP_NO_CONTENT:
             return resp
 
-        if is_Lifecycle_in_Header(resp.headers):
+        if is_lifecycle_in_header(resp.headers):
             lifecycle = resp.headers[CONTAINER_LIFECYCLE_SYSMETA]
 
         else:
@@ -311,7 +314,7 @@ class LifecycleManageController(WSGIContext):
                 return resp
 
             prevLifecycle = None
-            if is_Lifecycle_in_Header(resp.headers):
+            if is_lifecycle_in_header(resp.headers):
                 prevLifecycle = resp.headers[CONTAINER_LIFECYCLE_SYSMETA]
 
             if 'lifecycle' in req.params:

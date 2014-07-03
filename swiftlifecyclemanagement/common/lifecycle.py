@@ -188,8 +188,8 @@ class Object(object):
 
         if container:
             if object:
-                #if container == object:
-                #    return LIFECYCLE_OK
+                if container == object:
+                    return LIFECYCLE_OK
 
                 for key in ('Expiration', 'Transition'):
                     if (key not in container and
