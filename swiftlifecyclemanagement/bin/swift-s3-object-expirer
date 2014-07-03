@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-from daemon.expirer import ObjectExpirer
-
 from swift.common.daemon import run_daemon
 from swift.common.utils import parse_options
 from optparse import OptionParser
+
+from swiftlifecyclemanagement.daemon.expirer import ObjectExpirer
 
 if __name__ == '__main__':
     parser = OptionParser("%prog CONFIG [options]")

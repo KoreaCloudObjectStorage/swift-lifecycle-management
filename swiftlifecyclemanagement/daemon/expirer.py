@@ -6,14 +6,15 @@ from time import time
 from os.path import join
 from swift import gettext_ as _
 import hashlib
-
 from eventlet import sleep, Timeout
 from eventlet.greenpool import GreenPool
-
 from swift.common.daemon import Daemon
 from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
 from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT
+
+from swiftlifecyclemanagement.common.lifecycle import \
+    CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META
 
 
 class ObjectExpirer(Daemon):
@@ -219,12 +220,10 @@ class ObjectExpirer(Daemon):
         if resp.status_int is HTTP_NOT_FOUND:
             return None
 
-        lc_sysmeta = 'X-Container-Sysmeta-S3-Lifecycle-Configuration'
-
-        if lc_sysmeta not in resp.headers:
+        if CONTAINER_LIFECYCLE_SYSMETA not in resp.headers:
             return None
 
-        rule_list = ast.literal_eval(resp.headers[lc_sysmeta])
+        rule_list = ast.literal_eval(resp.headers[CONTAINER_LIFECYCLE_SYSMETA])
         prefixMap = map(itemgetter('Prefix'), rule_list)
 
         prefixIndex = -1
@@ -255,15 +254,15 @@ class ObjectExpirer(Daemon):
         if resp.status_int is HTTP_NOT_FOUND:
             return None
 
-        if 'X-Object-Meta-Rule-Id' not in resp.headers:
+        if OBJECT_LIFECYCLE_META['id'] not in resp.headers:
             return None
 
         lifecycle = dict()
-        lifecycle['ID'] = resp.headers['X-Object-Meta-Rule-Id']
+        lifecycle['ID'] = resp.headers[OBJECT_LIFECYCLE_META['id']]
         for key, value in resp.headers.iteritems():
-            if key in ('X-Object-Meta-Expiration-Last-Modified',
-                       'X-Object-Meta-Transition-Last-Modified'):
-                lifecycle[key.split('-', 4)[3]] = value
+            if key in (OBJECT_LIFECYCLE_META['transition-last'],
+                       OBJECT_LIFECYCLE_META['expire-last']):
+                lifecycle[key.split('-', 5)[4]] = value
 
         return lifecycle
 
