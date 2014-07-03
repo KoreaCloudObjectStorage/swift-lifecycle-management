@@ -1,11 +1,11 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 import swiftlifecyclemanagement
 
 setup(
     name='swiftlifecyclemanagement',
     version=swiftlifecyclemanagement.version,
-    packages=['swiftlifecyclemanagement', 'swiftlifecyclemanagement.middleware', 'swiftlifecyclemanagement.middleware.lifecycle', 'swiftlifecyclemanagement.common'],
+    packages=find_packages(),
     url='http://a2company.co.kr',
     license='',
     author='nexusz99',
