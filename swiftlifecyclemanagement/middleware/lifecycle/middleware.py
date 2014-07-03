@@ -109,7 +109,7 @@ class ObjectController(WSGIContext):
             for key in actionList:
                 self.hidden_update(env, hidden={
                     'account': self.hidden_accounts[key.lower()],
-                    'container': actionList[key.lower()]
+                    'container': actionList[key]
                 }, orig={
                     'account': self.account,
                     'container': self.container,
@@ -165,7 +165,8 @@ class ObjectController(WSGIContext):
             for rule in lifecycle:
                 prefix = rule['Prefix']
                 if self.object.startswith(prefix):
-                    headers, actionList = make_object_metadata_from_rule(rule)
+                    headers = make_object_metadata_from_rule(rule)
+                    actionList = calc_when_actions_do(rule, time.time())
                     break
 
             if actionList:

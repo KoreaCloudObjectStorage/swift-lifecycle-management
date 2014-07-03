@@ -228,9 +228,9 @@ def calc_when_actions_do(rule, from_time):
             continue
         action = rule[key]
         if 'Date' in action:
-           time = calendar.timegm(datetime.strptime(action['Date'],
-                                                    '%Y-%m-%dT%H:%M:%S+00:00')
-                                  .timetuple())
+            time = calendar.timegm(datetime.strptime(action['Date'],
+                                                     '%Y-%m-%dT%H:%M:%S+00:00')
+                                   .timetuple())
         elif 'Days' in action:
             time = calc_nextDay(from_time) + int(action['Days']) * day_seconds
             time = normalize_delete_at_timestamp(time)
