@@ -1,6 +1,4 @@
 import urllib
-import ast
-from operator import itemgetter
 from random import random
 from time import time
 from os.path import join
@@ -13,8 +11,8 @@ from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
 from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT
 
-from swiftlifecyclemanagement.common.lifecycle import \
-    CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META, Object, LIFECYCLE_OK
+from swiftlifecyclemanagement.common.lifecycle import Object, LIFECYCLE_OK, calc_when_actions_do
+from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
 
 
 class ObjectExpirer(Daemon):
@@ -178,25 +176,31 @@ class ObjectExpirer(Daemon):
 
         return processes, process
 
-    def delete_object(self, container, obj):
+    def delete_object(self, hidden_container, obj):
         start_time = time()
         try:
             account, container, object = self.split_object_path(obj)
             o = Object(account, container, object, swift_client=self.swift)
-            validation_flg = o.object_lifecycle_validation()
+            object_header = o.o_lifecycle.headers
+            object_rule = o.get_object_lifecycle()
+            last_modified = gmt_to_timestamp(object_header['Last-Modified'])
 
+            validation_flg = o.object_lifecycle_validation()
             if validation_flg == LIFECYCLE_OK:
-                self.delete_actual_object(obj)
+                times = calc_when_actions_do(object_rule, last_modified)
+                actual_expire_time = int(times['Expiration'])
+                if actual_expire_time == int(hidden_container):
+                    self.delete_actual_object(obj)
 
             self.swift.delete_object(self.s3_expiring_objects_account,
-                                     container, obj)
+                                     hidden_container, obj)
             self.report_objects += 1
             self.logger.increment('objects')
         except (Exception, Timeout) as err:
             self.logger.increment('errors')
             self.logger.exception(
                 _('Exception while deleting object %s %s %s') %
-                (container, obj, str(err)))
+                (hidden_container, obj, str(err)))
         self.logger.timing_since('timing', start_time)
         self.report()
 
