@@ -11,13 +11,13 @@ from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
 from time import time
 import urllib
-from common.lifecycle import Object, LIFECYCLE_OK, GLACIER_FLAG_META
+from swiftlifecyclemanagement.common.lifecycle import Object, LIFECYCLE_OK, \
+    GLACIER_FLAG_META
 
 
 class ObjectTransitor(Daemon):
     def __init__(self, conf):
         super(ObjectTransitor, self).__init__(conf)
-        swift_dir = conf.get('swift_dir', '/etc/swift')
         self.conf = conf
         self.logger = get_logger(conf, log_route='s3-object-transitor')
         self.interval = int(conf.get('interval') or 300)
