@@ -6,7 +6,7 @@ from random import random
 
 from swift import gettext_ as _
 from swift.common.daemon import Daemon
-from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT
+from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT, is_success
 from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
 from time import time
@@ -186,16 +186,18 @@ class ObjectTransitor(Daemon):
             o = Object(obj_account, obj_container, obj_object,
                        swift_client=self.swift)
 
-            object_header = o.o_lifecycle.headers
-            object_rule = o.get_object_lifecycle()
-            last_modified = gmt_to_timestamp(object_header['Last-Modified'])
+            if is_success(o.o_lifecycle.status):
+                object_header = o.o_lifecycle.headers
+                object_rule = o.get_object_lifecycle()
+                last_modified = object_header['Last-Modified']
+                last_modified = gmt_to_timestamp(last_modified)
 
-            validation_flg = o.object_lifecycle_validation()
-            if validation_flg == LIFECYCLE_OK:
-                times = calc_when_actions_do(object_rule, last_modified)
-                actual_expire_time = int(times['Transition'])
-                if actual_expire_time == int(container):
-                    self.request_transition(obj)
+                validation_flg = o.object_lifecycle_validation()
+                if validation_flg == LIFECYCLE_OK:
+                    times = calc_when_actions_do(object_rule, last_modified)
+                    actual_expire_time = int(times['Transition'])
+                    if actual_expire_time == int(container):
+                        self.request_transition(obj)
 
             self.swift.delete_object(self.s3_transition_objects_account,
                                      container, obj)
