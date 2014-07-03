@@ -256,37 +256,19 @@ def is_Lifecycle_in_Header(headers):
     return False
 
 
-def get_lifecycle_headers(rule, current_time):
+def make_object_metadata_from_rule(rule):
     headers = dict()
-    actionList = dict()
-
     headers[OBJECT_LIFECYCLE_META['id']] = rule['ID']
-
     if 'Expiration' in rule:
         expiration = rule['Expiration']
         headers[OBJECT_LIFECYCLE_META['expire-last']] = \
             expiration['expiration-last-modified']
 
-        # Date type is ISO 8601
-        if 'Date' in expiration:
-            #Reference : https://gist.github.com/squioc/3078803
-            actionList['expiration'] = calendar.timegm(
-                datetime.strptime(expiration['Date'],
-                                  "%Y-%m-%dT%H:%M:%S+00:00").timetuple())
-        elif 'Days' in expiration:
-            actionList['expiration'] =  \
-                normalize_delete_at_timestamp(calc_nextDay(current_time) +
-                                              int(expiration['Days']) *
-                                              day_seconds)
-
     if 'Transition' in rule:
         transition = rule['Transition']
         headers[OBJECT_LIFECYCLE_META['transition-last']] = \
             transition['transition-last-modified']
-        actionList['transition'] = normalize_delete_at_timestamp(\
-            calc_nextDay(current_time) + int(transition['Days']) * day_seconds)
-
-    return headers, actionList
+    return headers
 
 
 def calc_nextDay(timestamp):

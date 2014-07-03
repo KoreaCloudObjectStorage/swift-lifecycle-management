@@ -19,11 +19,11 @@ from swift.common.bufferedhttp import http_connect
 from exceptions import LifecycleConfigException
 from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, \
     updateLifecycleMetadata, validationCheck, is_Lifecycle_in_Header, \
-    get_lifecycle_headers, calc_nextDay, day_seconds
+    make_object_metadata_from_rule, calc_nextDay, day_seconds
 from swiftlifecyclemanagement.common.lifecycle import Object, CONTAINER_LIFECYCLE_NOT_EXIST, \
     LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
     CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, LIFECYCLE_OK, \
-    CONTAINER_LIFECYCLE_SYSMETA
+    CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do
 
 
 def get_err_response(err):
@@ -94,22 +94,19 @@ class ObjectController(WSGIContext):
 
         elif obj_lc_status in (OBJECT_LIFECYCLE_NOT_EXIST,
                                CONTAINER_LIFECYCLE_IS_UPDATED):
+            # Make new object metadata
+            object_rule = o.c_lifecycle.get_rule_by_prefix(self.object)
+            new_header = make_object_metadata_from_rule(object_rule)
+            actionList = calc_when_actions_do(object_rule, last_modified)
+
             # Update object meta to container LC
-            new_header, actionList =\
-                get_lifecycle_headers(
-                    o.c_lifecycle.get_rule_by_prefix(self.object),
-                    last_modified)
             req = Request(copy(env))
             req.method = 'POST'
             req.headers.update(new_header)
             req.get_response(self.app)
 
             #Update Hidden Information
-            container_timestamp = \
-                o.c_lifecycle.get_action_timestamp_by_prefix(self.object)
-            del container_timestamp['ID']
-
-            for key in container_timestamp:
+            for key in actionList:
                 self.hidden_update(env, hidden={
                     'account': self.hidden_accounts[key.lower()],
                     'container': actionList[key.lower()]
@@ -131,24 +128,14 @@ class ObjectController(WSGIContext):
 
         o.reload()
         object_lifecycle = o.get_object_lifecycle()
-        headers = dict()
         if 'Expiration' in object_lifecycle:
-            expiration = object_lifecycle['Expiration']
-            if 'Days' in expiration:
-                expire_time = calc_nextDay(last_modified) + \
-                              int(expiration['Days']) * day_seconds
-                expire_at = normalize_delete_at_timestamp(expire_time)
-            elif 'Date' in expiration:
-                expire_date = datetime.strptime(expiration['Date'],
-                                                "%Y-%m-%dT%H:%M:%S+00:00")
-                expire_at = calendar.timegm(expire_date.timetuple())
-
+            expire_at = calc_when_actions_do(object_lifecycle, last_modified)
             expire_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT",
                                         time.gmtime(float(expire_at)))
-            headers['X-Amz-Expiration'] = 'expiry-date="%s", rule-id="%s"' \
-                                          % (expire_date,
-                                             object_lifecycle['ID'])
-        resp.headers.update(headers)
+            resp.headers['X-Amz-Expiration'] = 'expiry-date="%s",' \
+                                               'rule-id="%s"' % \
+                                               (expire_date,
+                                                object_lifecycle['ID'])
         return resp
 
     def GET(self, env, start_response):
@@ -178,8 +165,7 @@ class ObjectController(WSGIContext):
             for rule in lifecycle:
                 prefix = rule['Prefix']
                 if self.object.startswith(prefix):
-                    headers, actionList = get_lifecycle_headers(rule,
-                                                                time.time())
+                    headers, actionList = make_object_metadata_from_rule(rule)
                     break
 
             if actionList:

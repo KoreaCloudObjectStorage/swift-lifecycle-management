@@ -1,11 +1,15 @@
 import ast
+import calendar
 from copy import copy
+from datetime import datetime
 from operator import itemgetter
 
 from swift.common.http import is_success
 from swift.common.swob import Request
 
 # List of Lifecycle Comparison Result
+from swift.common.utils import normalize_delete_at_timestamp
+
 LIFECYCLE_OK = 0
 LIFECYCLE_ERROR = 1
 LIFECYCLE_NOT_EXIST = 2
@@ -25,6 +29,8 @@ OBJECT_LIFECYCLE_META = {
     'transition-last': 'X-Object-Meta-S3-Transition-Last-Modified'
 }
 
+day_seconds = 86400
+
 
 class ContainerLifecycle(object):
     def __init__(self, account, container, swift_client=None, env=None,
@@ -36,7 +42,7 @@ class ContainerLifecycle(object):
         self.path = '/v1/%s/%s' % (account, container)
         self.__initialize()
 
-    def get_action_timestamp_by_prefix(self, prefix):
+    def get_action_metadata_by_prefix(self, prefix):
         rule = self.get_rule_by_prefix(prefix)
 
         if not rule:
@@ -177,7 +183,7 @@ class Object(object):
 
     def object_lifecycle_validation(self):
         container = \
-            self.c_lifecycle.get_action_timestamp_by_prefix(self.object)
+            self.c_lifecycle.get_action_metadata_by_prefix(self.object)
         object = self.o_lifecycle.get_object_lifecycle_meta()
 
         if container:
@@ -212,3 +218,27 @@ class Object(object):
     def reload(self):
         self.o_lifecycle.reload()
         self.c_lifecycle.reload()
+
+
+def calc_when_actions_do(rule, from_time):
+    timelist = dict()
+
+    for key in ('Expiration', 'Transition'):
+        if key not in rule:
+            continue
+        action = rule[key]
+        if 'Date' in action:
+           time = calendar.timegm(datetime.strptime(action['Date'],
+                                                    '%Y-%m-%dT%H:%M:%S+00:00')
+                                  .timetuple())
+        elif 'Days' in action:
+            time = calc_nextDay(from_time) + int(action['Days']) * day_seconds
+            time = normalize_delete_at_timestamp(time)
+        timelist[key] = time
+    return timelist
+
+
+def calc_nextDay(timestamp):
+    current = normalize_delete_at_timestamp(int(timestamp) / day_seconds *
+                                            day_seconds)
+    return int(current) + day_seconds
