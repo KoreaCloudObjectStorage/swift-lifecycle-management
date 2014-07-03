@@ -7,7 +7,7 @@ import calendar
 from datetime import datetime
 from swift.common.utils import normalize_delete_at_timestamp
 
-from common.lifecycle import CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META
+from swiftlifecyclemanagement.common.lifecycle import CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META
 from exceptions import LifecycleConfigException
 
 
@@ -249,44 +249,26 @@ def get_status_int(status):
     return int(status.split(' ', 1)[0])
 
 
-def is_Lifecycle_in_Header(headers):
+def is_lifecycle_in_header(headers):
     if CONTAINER_LIFECYCLE_SYSMETA in headers and \
        headers[CONTAINER_LIFECYCLE_SYSMETA] != 'None':
         return True
     return False
 
 
-def get_lifecycle_headers(rule, current_time):
+def make_object_metadata_from_rule(rule):
     headers = dict()
-    actionList = dict()
-
     headers[OBJECT_LIFECYCLE_META['id']] = rule['ID']
-
     if 'Expiration' in rule:
         expiration = rule['Expiration']
         headers[OBJECT_LIFECYCLE_META['expire-last']] = \
             expiration['expiration-last-modified']
 
-        # Date type is ISO 8601
-        if 'Date' in expiration:
-            #Reference : https://gist.github.com/squioc/3078803
-            actionList['expiration'] = calendar.timegm(
-                datetime.strptime(expiration['Date'],
-                                  "%Y-%m-%dT%H:%M:%S+00:00").timetuple())
-        elif 'Days' in expiration:
-            actionList['expiration'] =  \
-                normalize_delete_at_timestamp(calc_nextDay(current_time) +
-                                              int(expiration['Days']) *
-                                              day_seconds)
-
     if 'Transition' in rule:
         transition = rule['Transition']
         headers[OBJECT_LIFECYCLE_META['transition-last']] = \
             transition['transition-last-modified']
-        actionList['transition'] = normalize_delete_at_timestamp(\
-            calc_nextDay(current_time) + int(transition['Days']) * day_seconds)
-
-    return headers, actionList
+    return headers
 
 
 def calc_nextDay(timestamp):
