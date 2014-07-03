@@ -203,7 +203,7 @@ class ObjectTransitor(Daemon):
                                      container, obj)
             self.report_objects += 1
             self.logger.increment('objects')
-        except (Exception, Timeout) as err:
+        except (Exception, Timeout):
             self.logger.increment('errors')
             self.logger.exception(
                 _('Exception while transitioning object %s %s %s') %
