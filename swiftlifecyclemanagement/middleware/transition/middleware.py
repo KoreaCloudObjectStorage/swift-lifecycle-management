@@ -18,7 +18,6 @@ class TransitionMiddleware(object):
         self.logger = get_logger(self.conf, log_route='transition')
         self.container_ring = Ring('/etc/swift', ring_name='container')
         self.glacier_account_prefix = '.glacier_'
-        self.s3_user_meta_prefix = 'X-Object-Meta-S3-'
 
     def transition(self, env):
         # GET Object body
@@ -28,8 +27,7 @@ class TransitionMiddleware(object):
         # 헤더에서 User-Metadata만 가져온다.
         obj_user_meta = {}
         obj_user_meta.update(val for val in resp.headers.iteritems()
-                             if is_user_meta('object', val[0]) and
-                             val[0].startswith(self.s3_user_meta_prefix))
+                             if is_user_meta('object', val[0]))
         obj_body = resp.body
 
         # TODO Glacier로 업로드
