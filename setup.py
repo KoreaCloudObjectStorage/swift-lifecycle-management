@@ -11,7 +11,7 @@ setup(
     author='nexusz99',
     author_email='nexusz99@a2company.co.kr',
     description='Swift Lifecycle Manamgment Middleware',
-    requires=['swift(>=1.4)'],
+    requires=['swift(>=1.4)', 'boto(>=2.0)'],
     entry_points={'paste.filter_factory':
                         ['swiftlifecyclemanagement=swiftlifecyclemanagement.middleware.lifecycle.middleware:filter_factory']}
 )
