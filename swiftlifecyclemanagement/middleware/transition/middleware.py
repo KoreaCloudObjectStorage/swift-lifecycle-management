@@ -1,4 +1,5 @@
 # coding=utf-8
+from boto.glacier.layer2 import Layer2
 from swift.common.http import HTTP_NO_CONTENT
 from swift.common.request_helpers import is_user_meta
 import time
@@ -8,6 +9,7 @@ from swift.common.bufferedhttp import http_connect
 from swift.common.ring import Ring
 from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path, normalize_timestamp
+from hashlib import md5
 from swiftlifecyclemanagement.common.lifecycle import GLACIER_FLAG_META
 
 
@@ -18,6 +20,12 @@ class TransitionMiddleware(object):
         self.logger = get_logger(self.conf, log_route='transition')
         self.container_ring = Ring('/etc/swift', ring_name='container')
         self.glacier_account_prefix = '.glacier_'
+        self.temp_path = '/home/vagrant/test/'
+        self.glacier = self._init_glacier()
+
+    def _init_glacier(self):
+        con = Layer2()
+        return con.get_vault('swift-s3-transition')
 
     def transition(self, env):
         # GET Object body
@@ -30,8 +38,10 @@ class TransitionMiddleware(object):
                              if is_user_meta('object', val[0]))
         obj_body = resp.body
 
-        # TODO Glacier로 업로드
-        glacier_obj = '%s/%s/%s' % (self.account, self.container, self.obj)
+        # Glacier로 업로드
+        tmpfile = self.save_to_tempfile(obj_body)
+        archive_id = self.glacier.upload_archive(tmpfile)
+        glacier_obj = '%s-%s' % (self.obj, archive_id)
 
         # Object를 user metadata를 유지하면서 0KB로 만들기
         req = Request(copy(env))
@@ -43,6 +53,8 @@ class TransitionMiddleware(object):
         glacier_account = self.glacier_account_prefix + self.account
         part, nodes = self.container_ring.get_nodes(glacier_account,
                                                     self.container)
+        hidden_path = '/%s/%s/%s' % (glacier_account, self.container,
+                                     glacier_obj)
         for node in nodes:
             ip = node['ip']
             port = node['port']
@@ -55,10 +67,22 @@ class TransitionMiddleware(object):
             headers['x-content-type'] = 'text/plain'
             headers['x-etag'] = 'd41d8cd98f00b204e9800998ecf8427e'
 
-            conn = http_connect(ip, port, dev, part, 'PUT', glacier_obj,
+            conn = http_connect(ip, port, dev, part, 'PUT', hidden_path,
                                 headers)
             conn.getresponse().read()
         return Response(status=HTTP_NO_CONTENT)
+
+    def save_to_tempfile(self, data):
+        etag = md5()
+        etag.update(data)
+        etag = etag.hexdigest()
+        tmp_path = self.temp_path+etag
+        try:
+            with open(tmp_path, 'w') as fp:
+                fp.write(data)
+        except Exception as e:
+            self.logger.error(e)
+        return tmp_path
 
     def __call__(self, env, start_response):
         req = Request(env)
