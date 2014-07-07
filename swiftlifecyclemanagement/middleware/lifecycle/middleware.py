@@ -2,15 +2,18 @@
 import ast
 import time
 import calendar
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from urllib2 import unquote
 from operator import itemgetter
 from copy import copy
+from simplejson import loads
+from xml.sax.saxutils import escape as xml_escape
 
 from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path, \
     normalize_delete_at_timestamp, \
-    normalize_timestamp
+    normalize_timestamp, urlparse
 from swift.common.wsgi import WSGIContext
 from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK, \
     HTTP_FORBIDDEN
@@ -24,6 +27,7 @@ from swiftlifecyclemanagement.common.lifecycle import Object, CONTAINER_LIFECYCL
     LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
     CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, LIFECYCLE_OK, \
     CONTAINER_LIFECYCLE_SYSMETA
+from swift.common.request_helpers import is_user_meta
 
 
 def get_err_response(err):
@@ -159,6 +163,16 @@ class ObjectController(WSGIContext):
     def HEAD(self, env, start_response):
         return self.GETorHEAD(env, start_response)
 
+    def POST(self, env, start_response):
+        if 'QUERY_STRING' in env:
+            args = dict(urlparse.parse_qsl(env['QUERY_STRING'], 1))
+        else:
+            args = {}
+
+        if 'restore' in args:
+            return self.restore_object(env)
+        return self.app
+
     def PUT(self, env, start_response):
         req = Request(copy(env))
         req.method = 'HEAD'
@@ -223,6 +237,78 @@ class ObjectController(WSGIContext):
             response = conn.getresponse()
             response.read()
 
+    def restore_object(self, env):
+        req = Request(env)
+
+        # Get Restored object expire days from xml
+        body = req.body
+        days = self._get_days_from_restore_xml(body)
+        # Set Metadata
+        expire_meta = 'X-Object-Meta-S3-Restore-Expire-Days'
+        metadata = {
+            expire_meta: days
+        }
+
+        hidden_obj = self.get_transition_object()
+        self.start_restoring('.s3_restoring_objects', 'todo', hidden_obj,
+                             metadata=metadata)
+
+        # Update Object Meta to restoring
+        restore_meta = {
+            'X-Object-Meta-S3-Restore': 'ongoing-request="true"'
+        }
+
+        # GET exist object metadata
+        req2 = Request(copy(env))
+        req2.method = 'HEAD'
+        resp = req2.get_response(self.app)
+        restore_meta.update(val for val in resp.headers.iteritems()
+                            if is_user_meta('object', val[0]))
+
+        req.headers.update(restore_meta)
+        return req.get_response(self.app)
+
+    def _get_days_from_restore_xml(self, body):
+        root = ET.fromstring(body)
+        days = int(root.find('Days').text)
+        return days
+
+    def get_transition_object(self):
+        path = '/v1/.glacier_%s/%s' % (self.account, self.container)
+        req = Request.blank(path)
+        resp = req.get_response(self.app)
+        body = resp.body
+        objects = loads(''.join(list(body)))
+
+        for o in objects:
+            hobj = xml_escape(unquote(o['name']))
+            aobj = hobj.split('-', 2)[0]
+            if aobj == self.object:
+                break
+        return hobj
+
+    def start_restoring(self, account, container, object, metadata=None):
+        hidden_path = '/%s/%s/%s' % (account, container, object)
+        part, nodes = self.container_ring.get_nodes(account, container)
+        for node in nodes:
+            ip = node['ip']
+            port = node['port']
+            dev = node['device']
+            action_headers = dict()
+            action_headers['user-agent'] = 'restore-daemon'
+            action_headers['X-Timestamp'] = normalize_timestamp(time())
+            action_headers['referer'] = 'restore-daemon'
+            action_headers['x-size'] = '0'
+            action_headers['x-content-type'] = "text/plain"
+            action_headers['x-etag'] = 'd41d8cd98f00b204e9800998ecf8427e'
+
+            if metadata:
+                action_headers.update(metadata)
+
+            conn = http_connect(ip, port, dev, part, 'PUT', hidden_path,
+                                action_headers)
+            response = conn.getresponse()
+            response.read()
 
 class LifecycleManageController(WSGIContext):
     def __init__(self, app, **kwargs):
