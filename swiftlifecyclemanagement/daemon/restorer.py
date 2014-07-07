@@ -263,7 +263,11 @@ class ObjectRestorer(Daemon):
         # send restored object to proxy server
         path = '/v1/%s' % actual_obj
         metadata['X-Object-Meta-S3-Restored'] = True
-        metadata['X-Object-Meta-S3-Restored-Expire-At'] = expire_time
+        expire_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT",
+                                        time.gmtime(float(expire_time)))
+
+        metadata['X-Object-Meta-S3-Restore'] = 'ongoing-request="true" ' \
+                                               'expiry-date=%s' % expire_date
         self.swift.make_request('PUT', path, metadata, (2,),
                                 body_file=obj_body)
 

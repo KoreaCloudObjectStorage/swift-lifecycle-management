@@ -22,11 +22,12 @@ class RestoreMiddleware(object):
             return self.save_object(env)(env, start_response)
 
         if req.method == 'PUT' and 'X-Object-Meta-S3-Restore' in req.headers:
-            return self.set_restoring(env)
+            return self.set_restoring(env)(env, start_response)
 
         return self.app(env, start_response)
 
     def save_object(self, env):
+        # Restorer 데몬에 의해 호출됨
         req = Request(env)
         try:
             disk_file = self.get_diskfile(self.device, self.partition,
@@ -38,8 +39,8 @@ class RestoreMiddleware(object):
         ori_meta = disk_file.read_metadata()
         metadata = {}
         metadata.update(val for val in req.headers.iteritems()
-                                if is_user_meta('object', val[0]))
-
+                        if is_user_meta('object', val[0]))
+        del metadata['X-Object-Meta-S3-Restored']
         # Timestamp 값 유지
         metadata['X-Timestamp'] = ori_meta['X-Timestamp']
         metadata['Content-Type'] = ori_meta['Content-Type']
@@ -68,7 +69,27 @@ class RestoreMiddleware(object):
         return HTTPCreated(request=req)
 
     def set_restoring(self, env):
-        print 'a'
+        # Lifecycle Middleware 에서 restore 중이라고 object 를 설정할 때 호출됨
+        req = Request(env)
+        try:
+            disk_file = self.get_diskfile(self.device, self.partition,
+                                          self.account, self.container,
+                                          self.obj)
+        except DiskFileDeviceUnavailable:
+            return HTTPInsufficientStorage(drive=self.device,
+                                           request=Request(env))
+        ori_meta = disk_file.read_metadata()
+        metadata = {}
+        metadata.update(val for val in req.headers.iteritems()
+                        if is_user_meta('object', val[0]))
+
+        # Timestamp 값 유지
+        metadata['X-Timestamp'] = ori_meta['X-Timestamp']
+        metadata['Content-Type'] = ori_meta['Content-Type']
+        with disk_file.create(size=0) as writer:
+            writer.put(metadata)
+        return HTTPCreated(request=req)
+
 
 def filter_factory(global_conf, **local_conf):
     """Standard filter factory to use the middleware with paste.deploy"""
