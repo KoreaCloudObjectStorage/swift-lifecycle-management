@@ -1,11 +1,15 @@
 import ast
+import calendar
 from copy import copy
+from datetime import datetime
 from operator import itemgetter
 
 from swift.common.http import is_success
 from swift.common.swob import Request
 
 # List of Lifecycle Comparison Result
+from swift.common.utils import normalize_delete_at_timestamp
+
 LIFECYCLE_OK = 0
 LIFECYCLE_ERROR = 1
 LIFECYCLE_NOT_EXIST = 2
@@ -25,6 +29,8 @@ OBJECT_LIFECYCLE_META = {
     'transition-last': 'X-Object-Meta-S3-Transition-Last-Modified'
 }
 
+day_seconds = 86400
+
 
 class ContainerLifecycle(object):
     def __init__(self, account, container, swift_client=None, env=None,
@@ -36,7 +42,7 @@ class ContainerLifecycle(object):
         self.path = '/v1/%s/%s' % (account, container)
         self.__initialize()
 
-    def get_action_timestamp_by_prefix(self, prefix):
+    def get_action_metadata_by_prefix(self, prefix):
         rule = self.get_rule_by_prefix(prefix)
 
         if not rule:
@@ -71,7 +77,7 @@ class ContainerLifecycle(object):
         return rule
 
     def get_lifecycle(self):
-        if not self.headers and \
+        if not self.headers or \
            CONTAINER_LIFECYCLE_SYSMETA not in self.headers:
             return None
 
@@ -92,6 +98,9 @@ class ContainerLifecycle(object):
         if is_success(self.status):
             self.headers = resp.headers
 
+    def reload(self):
+        self.__initialize()
+
 
 class ObjectLifecycle(object):
     def __init__(self, account, container, object, swift_client=None,
@@ -104,7 +113,8 @@ class ObjectLifecycle(object):
         self.__initialize()
 
     def get_object_lifecycle_meta(self):
-        if not self.headers and OBJECT_LIFECYCLE_META['id'] in self.headers:
+        if not self.headers or \
+           OBJECT_LIFECYCLE_META['id'] not in self.headers:
             return None
 
         lifecycle = dict()
@@ -125,7 +135,8 @@ class ObjectLifecycle(object):
 
     def __initialize(self):
         if self.swift_client:
-            resp = self.swift_client.make_request('HEAD', self.path, {}, (2,))
+            resp = self.swift_client.make_request('HEAD', self.path, {},
+                                                  (2, 4))
         elif self.env:
             req = Request(self.env)
             req.method = 'HEAD'
@@ -136,6 +147,9 @@ class ObjectLifecycle(object):
 
         if is_success(self.status):
             self.headers = resp.headers
+
+    def reload(self):
+        self.__initialize()
 
 
 class Object(object):
@@ -170,27 +184,29 @@ class Object(object):
 
     def object_lifecycle_validation(self):
         container = \
-            self.c_lifecycle.get_action_timestamp_by_prefix(self.object)
+            self.c_lifecycle.get_action_metadata_by_prefix(self.object)
         object = self.o_lifecycle.get_object_lifecycle_meta()
 
         if container:
             if object:
-
                 if container == object:
                     return LIFECYCLE_OK
 
                 for key in ('Expiration', 'Transition'):
-                    if (key not in self.c_lifecycle and
-                       key in self .o_lifecycle) or \
-                        (key in self.c_lifecycle and
-                         key not in self.o_lifecycle):
+                    if (key not in container and
+                       key in object) or \
+                        (key in container and
+                         key not in object):
                         return CONTAINER_LIFECYCLE_IS_UPDATED
 
-                    if self.c_lifecycle[key] == self.o_lifecycle[key]:
+                    elif key not in container and key not in object:
                         continue
-                    elif self.c_lifecycle[key] > self.o_lifecycle[key]:
+
+                    if container[key] == object[key]:
+                        continue
+                    elif container[key] > object[key]:
                         return CONTAINER_LIFECYCLE_IS_UPDATED
-                    elif self.c_lifecycle[key] < self.o_lifecycle[key]:
+                    elif container[key] < object[key]:
                         return LIFECYCLE_ERROR
             else:
                 return OBJECT_LIFECYCLE_NOT_EXIST
@@ -199,3 +215,31 @@ class Object(object):
                 return CONTAINER_LIFECYCLE_NOT_EXIST
             else:
                 return LIFECYCLE_NOT_EXIST
+
+    def reload(self):
+        self.o_lifecycle.reload()
+        self.c_lifecycle.reload()
+
+
+def calc_when_actions_do(rule, from_time):
+    timelist = dict()
+
+    for key in ('Expiration', 'Transition'):
+        if key not in rule:
+            continue
+        action = rule[key]
+        if 'Date' in action:
+            time = calendar.timegm(datetime.strptime(action['Date'],
+                                                     '%Y-%m-%dT%H:%M:%S+00:00')
+                                   .timetuple())
+        elif 'Days' in action:
+            time = calc_nextDay(from_time) + int(action['Days']) * day_seconds
+            time = normalize_delete_at_timestamp(time)
+        timelist[key] = time
+    return timelist
+
+
+def calc_nextDay(timestamp):
+    current = normalize_delete_at_timestamp(int(timestamp) / day_seconds *
+                                            day_seconds)
+    return int(current) + day_seconds
