@@ -2,18 +2,17 @@
 import ast
 import time
 import xml.etree.ElementTree as ET
+import urlparse
 from urllib2 import unquote
 from operator import itemgetter
 from copy import copy
-from simplejson import loads
-from xml.sax.saxutils import escape as xml_escape
 
 from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path, \
-    normalize_timestamp, urlparse
+    normalize_timestamp
 from swift.common.wsgi import WSGIContext
 from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK, \
-    HTTP_FORBIDDEN
+    HTTP_FORBIDDEN, HTTP_BAD_REQUEST
 from swift.common.ring import Ring
 from swift.common.bufferedhttp import http_connect
 from exceptions import LifecycleConfigException
@@ -154,7 +153,7 @@ class ObjectController(WSGIContext):
         else:
             args = {}
 
-        if 'restore' in args:
+        if 'restoring' in args:
             return self.restore_object(env)
         return self.app
 
@@ -227,6 +226,12 @@ class ObjectController(WSGIContext):
     def restore_object(self, env):
         req = Request(env)
 
+        # Check If already restoring
+        is_restoring, headers = self.is_already_restoring(env)
+
+        if is_restoring:
+            return Response(status=HTTP_BAD_REQUEST, body='Already Restoring')
+
         # Get Restored object expire days from xml
         body = req.body
         days = self._get_days_from_restore_xml(body)
@@ -235,8 +240,7 @@ class ObjectController(WSGIContext):
         metadata = {
             expire_meta: days
         }
-
-        hidden_obj = self.get_transition_object()
+        hidden_obj = '%s/%s/%s' % (self.account, self.container, self.object)
         self.start_restoring('.s3_restoring_objects', 'todo', hidden_obj,
                              metadata=metadata)
 
@@ -246,33 +250,26 @@ class ObjectController(WSGIContext):
         }
 
         # GET exist object metadata
-        req2 = Request(copy(env))
-        req2.method = 'HEAD'
-        resp = req2.get_response(self.app)
-        restore_meta.update(val for val in resp.headers.iteritems()
+        restore_meta.update(val for val in headers.iteritems()
                             if is_user_meta('object', val[0]))
 
         req.headers.update(restore_meta)
         return req.get_response(self.app)
 
+    def is_already_restoring(self, env):
+        req = Request(copy(env))
+        req.method = 'HEAD'
+        resp = req.get_response(self.app)
+
+        existed = False
+        if 'X-Object-Meta-S3-Restore' in resp.headers:
+            existed = True
+        return existed, resp.headers
+
     def _get_days_from_restore_xml(self, body):
         root = ET.fromstring(body)
         days = int(root.find('Days').text)
         return days
-
-    def get_transition_object(self):
-        path = '/v1/.glacier_%s/%s' % (self.account, self.container)
-        req = Request.blank(path)
-        resp = req.get_response(self.app)
-        body = resp.body
-        objects = loads(''.join(list(body)))
-
-        for o in objects:
-            hobj = xml_escape(unquote(o['name']))
-            aobj = hobj.split('-', 2)[0]
-            if aobj == self.object:
-                break
-        return hobj
 
     def start_restoring(self, account, container, object, metadata=None):
         hidden_path = '/%s/%s/%s' % (account, container, object)
@@ -283,7 +280,7 @@ class ObjectController(WSGIContext):
             dev = node['device']
             action_headers = dict()
             action_headers['user-agent'] = 'restore-daemon'
-            action_headers['X-Timestamp'] = normalize_timestamp(time())
+            action_headers['X-Timestamp'] = normalize_timestamp(time.time())
             action_headers['referer'] = 'restore-daemon'
             action_headers['x-size'] = '0'
             action_headers['x-content-type'] = "text/plain"
@@ -542,7 +539,6 @@ class LifecycleMiddleware(object):
 
         if controller is None:
             return self.app(env, start_response)
-
         controller = controller(self.app, **path_parts)
 
         if hasattr(controller, req.method):

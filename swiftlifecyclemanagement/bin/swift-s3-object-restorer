@@ -3,7 +3,7 @@ from swift.common.daemon import run_daemon
 from swift.common.utils import parse_options
 from optparse import OptionParser
 
-from swiftlifecyclemanagement.daemon.transitor import ObjectTransitor
+from swiftlifecyclemanagement.daemon.restorer import ObjectRestorer
 
 if __name__ == '__main__':
     parser = OptionParser("%prog CONFIG [options]")
@@ -16,4 +16,4 @@ if __name__ == '__main__':
                       "is used to determine which part of the work this "
                       "process should do")
     conf_file, options = parse_options(parser=parser, once=True)
-    run_daemon(ObjectTransitor, conf_file, **options)
+    run_daemon(ObjectRestorer, conf_file, **options)

@@ -14,8 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from boto.glacier.layer2 import Layer2
+import os
 
 from random import random
+from swift.common.bufferedhttp import http_connect
+from swift.common.ring import Ring
+from swiftlifecyclemanagement.common.lifecycle import calc_nextDay
 from time import time
 from os.path import join
 from swift import gettext_ as _
@@ -26,7 +30,7 @@ from eventlet.greenpool import GreenPool
 
 from swift.common.daemon import Daemon
 from swift.common.internal_client import InternalClient
-from swift.common.utils import get_logger, dump_recon_cache
+from swift.common.utils import get_logger, dump_recon_cache, normalize_timestamp, normalize_delete_at_timestamp
 
 
 class ObjectRestorer(Daemon):
@@ -39,9 +43,11 @@ class ObjectRestorer(Daemon):
 
     def __init__(self, conf):
         self.conf = conf
+        self.container_ring = Ring('/etc/swift', ring_name='container')
         self.logger = get_logger(conf, log_route='object-restorer')
         self.interval = int(conf.get('interval') or 300)
         self.restoring_object_account = '.s3_restoring_objects'
+        self.expiring_restored_account = '.s3_expiring_restored_objects'
         self.glacier_account_prefix = '.glacier_'
         self.todo_container = 'todo'
         self.restoring_container = 'restoring'
@@ -106,10 +112,6 @@ class ObjectRestorer(Daemon):
         self.report_objects = 0
         try:
             self.logger.debug(_('Run begin'))
-            containers, objects = \
-                self.swift.get_account_info(self.restoring_object_account)
-            self.logger.info(_('Pass beginning; %s possible containers; %s '
-                               'possible objects') % (containers, objects))
 
             for o in self.swift.iter_objects(self.restoring_object_account,
                                              self.todo_container):
@@ -120,7 +122,7 @@ class ObjectRestorer(Daemon):
                         hexdigest(), 16)
                     if obj_process % processes != process:
                         continue
-                pool.spawn_n(self.restore_object, obj)
+                #pool.spawn_n(self.start_object_restoring, obj)
 
             pool.waitall()
 
@@ -129,7 +131,7 @@ class ObjectRestorer(Daemon):
                 obj = o['name'].encode('utf8')
                 if processes > 0:
                     obj_process = int(
-                        hashlib.md5('%s/%s' % (self.todo_container, obj)).
+                        hashlib.md5('%s/%s' % (self.restoring_container, obj)).
                         hexdigest(), 16)
                     if obj_process % processes != process:
                         continue
@@ -139,7 +141,7 @@ class ObjectRestorer(Daemon):
 
             self.logger.debug(_('Run end'))
             self.report(final=True)
-        except (Exception, Timeout):
+        except (Exception, Timeout) as e:
             self.logger.exception(_('Unhandled exception'))
 
     def run_forever(self, *args, **kwargs):
@@ -196,38 +198,107 @@ class ObjectRestorer(Daemon):
 
         return processes, process
 
-    def restore_object(self, actual_obj):
+    def start_object_restoring(self,  obj):
         start_time = time()
         try:
+            # OBJECT 형태 a/c/o-archiveid
+            actual_obj = obj
+            account, container, object = actual_obj.split('/', 2)
+            archiveId = self.get_archiveid(account, container, object)
+            jobId = self.glacier.retrieve_archive(archiveId).id
+            restoring_obj = '%s-%s' % (actual_obj, jobId)
+            meta_prefix = 'X-Object-Meta-'
+            meta = self.swift.get_object_metadata(account, container, object,
+                                           metadata_prefix=meta_prefix)
+            self.update_action_hidden(self.restoring_object_account,
+                                      self.restoring_container,
+                                      restoring_obj, metadata=meta)
 
+            self.swift.delete_container(self.restoring_object_account,
+                                        self.todo_container, obj)
             self.report_objects += 1
             self.logger.increment('objects')
         except (Exception, Timeout) as err:
             self.logger.increment('errors')
             self.logger.exception(
                 _('Exception while restoring object %s. %s') %
-                (actual_obj, str(err)))
+                (obj, str(err)))
         self.logger.timing_since('timing', start_time)
         self.report()
 
+    def get_archiveid(self, account, container, object):
+        glacier_account = '.glacier_%s' % account
+
+        for o in self.swift.iter_objects(glacier_account, container):
+            hobj = o['name']
+            aobj = hobj.split('-', 2)[0]
+            if aobj == object:
+                break
+        return hobj.split('-', 1)[1]
+
     def check_object_restored(self, restoring_object):
-        actual_obj, days, jobId = restoring_object.split('-', 3)
+        actual_obj, jobId = restoring_object.split('-', 2)
         job = self.glacier.get_job(job_id=jobId)
         if not job.completed:
             return
-        etag = hashlib.md5()
-        etag.update(restoring_object)
-        etag = etag.hexdigest()
+        self.complete_restore(actual_obj, job)
+
+    def complete_restore(self, actual_obj, job):
+        etag =self.compute_obj_md5(actual_obj)
 
         tmppath = self.glacier_tmpdir + etag
         job.download_to_file(filename=tmppath)
 
+        # open file
         obj_body = open(tmppath, 'r')
 
-        # TODO restored object 가 expire 될 시점 계산하기
+        meta_prefix = 'X-Object-Meta'
+        a, c, o = actual_obj.split('/', 2)
+        metadata = self.swift.get_object_metadata(a, c, o,
+                                                  metadata_prefix=meta_prefix)
+        days = int(metadata['X-Object-Meta-S3-Restore-Expire-Days'])
+        expire_time = normalize_delete_at_timestamp(calc_nextDay(time()) +
+                                                    (days-1) * 86400)
 
-        # TODO send restored object to proxy server
-        # self.swift.make_request()
+        # send restored object to proxy server
+        path = '/v1/%s' % actual_obj
+        metadata['X-Object-Meta-S3-Restored'] = True
+        metadata['X-Object-Meta-S3-Restored-Expire-At'] = expire_time
+        self.swift.make_request('PUT', path, metadata, (2,),
+                                body_file=obj_body)
 
-        # TODO DELETE tmp file
+        # Add to .s3_expiring_restored_objects
+        self.update_action_hidden(self.expiring_restored_account, expire_time,
+                                  actual_obj)
+        # DELETE tmp file
+        obj_body.close()
+        os.remove(tmppath)
 
+    def compute_obj_md5(self, obj):
+        etag = hashlib.md5()
+        etag.update(obj)
+        etag = etag.hexdigest()
+        return etag
+
+    def update_action_hidden(self, account, container, object, metadata=None):
+        hidden_path = '/%s/%s/%s' % (account, container, object)
+        part, nodes = self.container_ring.get_nodes(account, container)
+        for node in nodes:
+            ip = node['ip']
+            port = node['port']
+            dev = node['device']
+            action_headers = dict()
+            action_headers['user-agent'] = 'restore-daemon'
+            action_headers['X-Timestamp'] = normalize_timestamp(time())
+            action_headers['referer'] = 'restore-daemon'
+            action_headers['x-size'] = '0'
+            action_headers['x-content-type'] = "text/plain"
+            action_headers['x-etag'] = 'd41d8cd98f00b204e9800998ecf8427e'
+
+            if metadata:
+                action_headers.update(metadata)
+
+            conn = http_connect(ip, port, dev, part, 'PUT', hidden_path,
+                                action_headers)
+            response = conn.getresponse()
+            response.read()
