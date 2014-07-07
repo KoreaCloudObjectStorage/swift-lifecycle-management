@@ -3,7 +3,7 @@ from copy import copy
 from swift.common.exceptions import DiskFileDeviceUnavailable
 from swift.common.swob import Request, HTTPInsufficientStorage, HTTPCreated
 from swift.common.utils import get_logger
-from swift.common.request_helpers import split_and_validate_path
+from swift.common.request_helpers import split_and_validate_path, is_user_meta
 from swift.obj.diskfile import DiskFileManager
 from swiftlifecyclemanagement.common.lifecycle import GLACIER_FLAG_META
 
@@ -30,7 +30,6 @@ class TruncateMiddleware(object):
         # 따라서 별 다른 truncate를 할 필요가 없다.
 
         # TODO 원본 etga와 content-length를 저장할 방법 필요
-        # TODO 원본 Object Metatdata 도 저장해야한다.
         ori_meta = disk_file.read_metadata()
         metadata = {
             'X-Timestamp': ori_meta['X-Timestamp'],
@@ -39,6 +38,15 @@ class TruncateMiddleware(object):
             'Content-Length': 0,
             'X-Object-Meta-Glacier': True
         }
+        # 원본 Object Metatdata 도 저장
+        metadata.update(val for val in ori_meta.iteritems()
+                        if is_user_meta('object', val[0]))
+
+        # Object Restore 정보가 있으면 해당 정보 지움.
+        # 이 경우는 restored object expiration 임.
+        if 'X-Object-Meta-S3-Restore' in metadata:
+            del metadata['X-Object-Meta-S3-Restore']
+
         with disk_file.create(size=0) as writer:
             writer.put(metadata)
 

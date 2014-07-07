@@ -1,7 +1,6 @@
 # coding=utf-8
 from boto.glacier.layer2 import Layer2
 from swift.common.http import HTTP_NO_CONTENT
-from swift.common.request_helpers import is_user_meta
 import time
 from copy import copy
 
@@ -32,10 +31,7 @@ class TransitionMiddleware(object):
         req = Request(copy(env))
         req.method = 'GET'
         resp = req.get_response(self.app)
-        # 헤더에서 User-Metadata만 가져온다.
-        obj_user_meta = {}
-        obj_user_meta.update(val for val in resp.headers.iteritems()
-                             if is_user_meta('object', val[0]))
+
         obj_body = resp.body
 
         # Glacier로 업로드
@@ -43,10 +39,9 @@ class TransitionMiddleware(object):
         archive_id = self.glacier.upload_archive(tmpfile)
         glacier_obj = '%s-%s' % (self.obj, archive_id)
 
-        # Object를 user metadata를 유지하면서 0KB로 만들기
+        # Object를 0KB로 만들기
         req = Request(copy(env))
         req.headers[GLACIER_FLAG_META] = True
-        req.headers.update(obj_user_meta)
         resp = req.get_response(self.app)
 
         # Glacier Hidden account에 기록
