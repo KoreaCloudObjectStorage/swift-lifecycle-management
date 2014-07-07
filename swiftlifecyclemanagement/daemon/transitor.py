@@ -196,7 +196,7 @@ class ObjectTransitor(Daemon):
                 if validation_flg == LIFECYCLE_OK:
                     times = calc_when_actions_do(object_rule, last_modified)
                     actual_expire_time = int(times['Transition'])
-                    if actual_expire_time != int(container):
+                    if actual_expire_time == int(container):
                         self.request_transition(obj)
 
             self.swift.delete_object(self.s3_transition_objects_account,
