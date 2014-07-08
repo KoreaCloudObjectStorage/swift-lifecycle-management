@@ -107,6 +107,21 @@ def normalize_timestamp(timestamp):
     return '%010d' % min(max(0, float(timestamp)), 9999999999)
 
 
+def _iter_same_id(lc1, lc2):
+    for l1 in lc1:
+        for l2 in lc2:
+            if l1['ID'] != l2['ID']:
+                continue
+            yield l1, l2
+
+
+def _to_prev_info(_to, _from):
+    for key, value in _from.iteritems():
+        if not key.endswith('modified') and not key.endswith('propagated'):
+            continue
+        _to[key] = value
+
+
 def updateLifecycleMetadata(prevLifecycle, currLifecycle):
     '''
     같은 RULE ID에 대해 내용이 같으면, 이전에 설정된 last-modified 값으로 설정한다.
@@ -116,41 +131,24 @@ def updateLifecycleMetadata(prevLifecycle, currLifecycle):
     '''
 
     prevLifecycle = ast.literal_eval(prevLifecycle)
-    validationFlg = True
-    for prev in prevLifecycle:
-        for curr in currLifecycle:
-            if curr['ID'] != prev['ID']:
+    for prev, curr in _iter_same_id(prevLifecycle, currLifecycle):
+        for key, value in curr.iteritems():
+            if key not in prev:
+                continue
+            if type(value) is not dict:
                 continue
 
-            for key, value in curr.iteritems():
-                if key not in prev:
-                    validationFlg = False
-                    break
-                elif key in prev and type(value) is dict:
-                    validationFlg = False
-                    if 'Days' in value and 'Days' in prev[key]:
-                        validationFlg = True if value['Days'] == \
-                                                prev[key]['Days'] else False
-                    if 'Date' in value and 'Date' in prev[key]:
-                        validationFlg = True if value['Date'] == \
-                                                prev[key]['Date'] else False
-                    break
-                elif key in prev and prev[key] != value:
-                    validationFlg = False
-                    break
+            to_check = None
+            if 'Days' in value and 'Days' in prev[key]:
+                to_check = 'Days'
+            elif 'Date' in value and 'Date' in prev[key]:
+                to_check = 'Date'
 
-            if validationFlg is True:
-                if 'Transition' in curr.keys() and 'Transition' in prev.keys():
-                    curr['Transition']['transition-last-modified'] = \
-                        str(prev['Transition']['transition-last-modified'])
-                    curr['Transition']['transition-propagated'] = \
-                        str(prev['Transition']['transition-propagated'])
-                if 'Expiration' in curr.keys() and 'Expiration' in prev.keys():
-                    curr['Expiration']['expiration-last-modified'] = \
-                        str(prev['Expiration']['expiration-last-modified'])
-                    curr['Expiration']['expiration-propagated'] = \
-                        str(prev['Expiration']['expiration-propagated'])
-            validationFlg = True
+            if not to_check:
+                continue
+
+            if value[to_check] == prev[key][to_check]:
+                _to_prev_info(curr[key], prev[key])
 
 
 def validationCheck(rulelist):
