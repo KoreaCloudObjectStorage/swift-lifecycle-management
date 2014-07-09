@@ -90,6 +90,10 @@ class RestoreMiddleware(object):
             writer.put(metadata)
         return HTTPCreated(request=req)
 
+    def get_diskfile(self, device, partition, account, container, obj,
+                    **kwargs):
+        return self._diskfile_mgr.get_diskfile(device, partition, account,
+                                               container, obj, **kwargs)
 
 def filter_factory(global_conf, **local_conf):
     """Standard filter factory to use the middleware with paste.deploy"""
