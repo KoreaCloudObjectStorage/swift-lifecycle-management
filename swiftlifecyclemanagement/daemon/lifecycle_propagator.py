@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import ast
+import json
 from swift.common.http import is_success
 from time import time
 
@@ -250,12 +251,25 @@ class LifecyclePropagator(Daemon):
         return result
 
     def get_objects_by_prefix(self, account, container, prefix):
-        iter_objs = self.swift.iter_objects(account, container, marker=prefix)
+        iter_objs = self.iter_objects_by_prefix(account, container, prefix)
         objs = list()
-
         for o in iter_objs:
             objs.append(o['name'])
         return objs
+
+    def iter_objects_by_prefix(self, account, container, prefix):
+        path = self.swift.make_path(account, container)
+        resp = self.swift.make_request(
+            'GET', '%s?format=json&prefix=%s' %
+            (path, prefix),
+            {}, (2, 4))
+        if not resp.status_int == 200:
+            return
+        data = json.loads(resp.body)
+        if not data:
+            return
+        for item in data:
+            yield item
 
     def set_rule_propagated(self, rule):
         for key, value in rule.iteritems():
