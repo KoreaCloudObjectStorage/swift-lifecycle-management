@@ -62,15 +62,20 @@ class ObjectController(WSGIContext):
 
         http_status = o.o_lifecycle.status
         headers = o.o_lifecycle.headers
-        object_status = o.get_object_status()
+        object_status = o.get_s3_storage_class()
 
         if http_status is not HTTP_OK:
             return Response(status=http_status)
 
         last_modified = gmt_to_timestamp(headers['Last-Modified'])
 
+        is_glacier = False
+        if object_status == 'GLACIER' and \
+           'X-Object-Meta-S3-Restore' not in headers:
+            is_glacier = True
+
         # Glacier로 Transition 된 Object 일 경우
-        if object_status == 'GLACIER' and env['REQUEST_METHOD'] == 'GET':
+        if is_glacier and env['REQUEST_METHOD'] == 'GET':
             body = '<Error>\n' \
                    '<Code>InvalidObjectState</Code>\n' \
                    '<Message>The operation is not valid ' \
@@ -155,7 +160,7 @@ class ObjectController(WSGIContext):
 
         if 'restoring' in args:
             return self.restore_object(env)
-        return self.app
+        return Response(status=HTTP_BAD_REQUEST)
 
     def PUT(self, env, start_response):
         req = Request(copy(env))
@@ -228,7 +233,6 @@ class ObjectController(WSGIContext):
 
         # Check If already restoring
         is_restoring, headers = self.is_already_restoring(env)
-
         if is_restoring:
             return Response(status=HTTP_BAD_REQUEST, body='Already Restoring')
 
@@ -237,16 +241,13 @@ class ObjectController(WSGIContext):
         days = self._get_days_from_restore_xml(body)
         # Set Metadata
         expire_meta = 'X-Object-Meta-S3-Restore-Expire-Days'
-        metadata = {
-            expire_meta: days
-        }
         hidden_obj = '%s/%s/%s' % (self.account, self.container, self.object)
-        self.start_restoring('.s3_restoring_objects', 'todo', hidden_obj,
-                             metadata=metadata)
+        self.start_restoring('.s3_restoring_objects', 'todo', hidden_obj)
 
         # Update Object Meta to restoring
         restore_meta = {
-            'X-Object-Meta-S3-Restore': 'ongoing-request="true"'
+            'X-Object-Meta-S3-Restore': 'ongoing-request="true"',
+            expire_meta: days
         }
 
         # GET exist object metadata
@@ -403,6 +404,7 @@ class LifecycleManageController(WSGIContext):
             if 'lifecycle' in req.params:
 
                 if prevLifecycle is not None:
+                    prevLifecycle = ast.literal_eval(prevLifecycle)
                     updateLifecycleMetadata(prevLifecycle, lifecycle)
 
                 # Rule이 올바르게 설정되어 있는 지 검사

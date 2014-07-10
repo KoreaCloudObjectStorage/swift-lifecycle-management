@@ -20,7 +20,7 @@ from random import random
 from swift.common.bufferedhttp import http_connect
 from swift.common.ring import Ring
 from swiftlifecyclemanagement.common.lifecycle import calc_nextDay
-from time import time
+from time import time, strftime, gmtime
 from os.path import join
 from swift import gettext_ as _
 import hashlib
@@ -54,7 +54,7 @@ class ObjectRestorer(Daemon):
         conf_path = '/etc/swift/s3-object-restorer.conf'
         request_tries = int(conf.get('request_tries') or 3)
         self.glacier = self._init_glacier()
-        self.glacier_tmpdir = '/home/vagrant/test/restore'
+        self.glacier_tmpdir = '/home/vagrant/test/restore/'
         self.swift = InternalClient(conf_path,
                                     'Swift Object Restorer',
                                     request_tries)
@@ -122,7 +122,7 @@ class ObjectRestorer(Daemon):
                         hexdigest(), 16)
                     if obj_process % processes != process:
                         continue
-                #pool.spawn_n(self.start_object_restoring, obj)
+                pool.spawn_n(self.start_object_restoring, obj)
 
             pool.waitall()
 
@@ -207,15 +207,17 @@ class ObjectRestorer(Daemon):
             archiveId = self.get_archiveid(account, container, object)
             jobId = self.glacier.retrieve_archive(archiveId).id
             restoring_obj = '%s-%s' % (actual_obj, jobId)
-            meta_prefix = 'X-Object-Meta-'
+            meta_prefix = 'X-Object-Meta'
             meta = self.swift.get_object_metadata(account, container, object,
-                                           metadata_prefix=meta_prefix)
+                                                  metadata_prefix=meta_prefix)
+            meta = {'X-Object-Meta'+key: value for key, value in
+                    meta.iteritems()}
             self.update_action_hidden(self.restoring_object_account,
                                       self.restoring_container,
                                       restoring_obj, metadata=meta)
 
-            self.swift.delete_container(self.restoring_object_account,
-                                        self.todo_container, obj)
+            self.swift.delete_object(self.restoring_object_account,
+                                     self.todo_container, obj)
             self.report_objects += 1
             self.logger.increment('objects')
         except (Exception, Timeout) as err:
@@ -237,14 +239,16 @@ class ObjectRestorer(Daemon):
         return hobj.split('-', 1)[1]
 
     def check_object_restored(self, restoring_object):
-        actual_obj, jobId = restoring_object.split('-', 2)
+        actual_obj, jobId = restoring_object.split('-', 1)
         job = self.glacier.get_job(job_id=jobId)
         if not job.completed:
             return
         self.complete_restore(actual_obj, job)
+        self.swift.delete_object(self.restoring_object_account,
+                                 self.restoring_container, restoring_object)
 
     def complete_restore(self, actual_obj, job):
-        etag =self.compute_obj_md5(actual_obj)
+        etag = self.compute_obj_md5(actual_obj)
 
         tmppath = self.glacier_tmpdir + etag
         job.download_to_file(filename=tmppath)
@@ -256,18 +260,21 @@ class ObjectRestorer(Daemon):
         a, c, o = actual_obj.split('/', 2)
         metadata = self.swift.get_object_metadata(a, c, o,
                                                   metadata_prefix=meta_prefix)
-        days = int(metadata['X-Object-Meta-S3-Restore-Expire-Days'])
+        metadata = {'X-Object-Meta'+key: value for key, value in metadata
+                    .iteritems()}
+        days = int(metadata['X-Object-Meta-s3-restore-expire-days'])
         expire_time = normalize_delete_at_timestamp(calc_nextDay(time()) +
                                                     (days-1) * 86400)
 
         # send restored object to proxy server
         path = '/v1/%s' % actual_obj
         metadata['X-Object-Meta-S3-Restored'] = True
-        expire_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT",
-                                        time.gmtime(float(expire_time)))
+        expire_date = strftime("%a, %d %b %Y %H:%M:%S GMT",
+                               gmtime(float(expire_time)))
 
-        metadata['X-Object-Meta-S3-Restore'] = 'ongoing-request="true" ' \
+        metadata['X-Object-Meta-s3-restore'] = 'ongoing-request="false" ' \
                                                'expiry-date=%s' % expire_date
+        metadata['Content-Length'] = os.path.getsize(tmppath)
         self.swift.make_request('PUT', path, metadata, (2,),
                                 body_file=obj_body)
 

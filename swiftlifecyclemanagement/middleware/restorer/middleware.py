@@ -4,6 +4,7 @@ from swift.common.request_helpers import split_and_validate_path, is_user_meta
 from swift.common.swob import Request, HTTPInsufficientStorage, HTTPRequestTimeout, HTTPCreated
 from swift.common.utils import get_logger
 from hashlib import md5
+from swift.obj.diskfile import DiskFileManager
 
 
 class RestoreMiddleware(object):
@@ -11,6 +12,7 @@ class RestoreMiddleware(object):
         self.app = app
         self.conf = conf
         self.logger = get_logger(self.conf, log_route='restore')
+        self._diskfile_mgr = DiskFileManager(conf, self.logger)
 
     def __call__(self, env, start_response):
         req = Request(env)
@@ -66,7 +68,7 @@ class RestoreMiddleware(object):
         except DiskFileNoSpace:
             return HTTPInsufficientStorage(drive=self.device, request=req)
 
-        return HTTPCreated(request=req)
+        return HTTPCreated(request=req, etag=etag)
 
     def set_restoring(self, env):
         # Lifecycle Middleware 에서 restore 중이라고 object 를 설정할 때 호출됨
@@ -79,16 +81,15 @@ class RestoreMiddleware(object):
             return HTTPInsufficientStorage(drive=self.device,
                                            request=Request(env))
         ori_meta = disk_file.read_metadata()
-        metadata = {}
+        metadata = ori_meta
+        print metadata
         metadata.update(val for val in req.headers.iteritems()
                         if is_user_meta('object', val[0]))
 
         # Timestamp 값 유지
-        metadata['X-Timestamp'] = ori_meta['X-Timestamp']
-        metadata['Content-Type'] = ori_meta['Content-Type']
         with disk_file.create(size=0) as writer:
             writer.put(metadata)
-        return HTTPCreated(request=req)
+        return HTTPCreated(request=req, etag=ori_meta['ETag'])
 
     def get_diskfile(self, device, partition, account, container, obj,
                     **kwargs):

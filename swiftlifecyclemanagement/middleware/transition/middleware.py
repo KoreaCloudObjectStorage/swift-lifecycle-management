@@ -2,6 +2,7 @@
 from boto.glacier.layer2 import Layer2
 from swift.common.http import HTTP_NO_CONTENT
 import time
+import os
 from copy import copy
 
 from swift.common.bufferedhttp import http_connect
@@ -38,6 +39,7 @@ class TransitionMiddleware(object):
         tmpfile = self.save_to_tempfile(obj_body)
         archive_id = self.glacier.upload_archive(tmpfile)
         glacier_obj = '%s-%s' % (self.obj, archive_id)
+        self.delete_tempfile(tmpfile)
 
         # Object를 0KB로 만들기
         req = Request(copy(env))
@@ -78,6 +80,9 @@ class TransitionMiddleware(object):
         except Exception as e:
             self.logger.error(e)
         return tmp_path
+
+    def delete_tempfile(self, tmppath):
+        os.remove(tmppath)
 
     def __call__(self, env, start_response):
         req = Request(env)
