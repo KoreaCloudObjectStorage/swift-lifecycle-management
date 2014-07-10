@@ -179,7 +179,7 @@ class Lifecycle(object):
         if rule_id not in rule_id_map:
             return None
 
-        return lifecycle[rule_id_map.index(id)]
+        return lifecycle[rule_id_map.index(rule_id)]
 
     def object_lifecycle_validation(self):
         obj_name = self.object.obj_name
@@ -221,7 +221,7 @@ class Lifecycle(object):
 
 
 def calc_when_actions_do(rule, from_time):
-    timelist = dict()
+    actions_timestamp = dict()
 
     for key in ('Expiration', 'Transition'):
         if key not in rule:
@@ -235,8 +235,8 @@ def calc_when_actions_do(rule, from_time):
         elif 'Days' in action:
             time = calc_nextDay(from_time) + int(action['Days']) * DAYS_SECONDS
             time = normalize_delete_at_timestamp(time)
-        timelist[key] = time
-    return timelist
+        actions_timestamp[key] = time
+    return actions_timestamp
 
 
 def calc_nextDay(timestamp):
