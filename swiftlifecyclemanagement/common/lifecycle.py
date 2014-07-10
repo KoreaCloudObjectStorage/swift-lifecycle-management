@@ -29,10 +29,10 @@ OBJECT_LIFECYCLE_META = {
     'transition-last': 'X-Object-Meta-S3-Transition-Last-Modified'
 }
 
-day_seconds = 86400
+DAYS_SECONDS = 86400
 
 
-class ContainerLifecycle(object):
+class LifecycleCommon(object):
     def __init__(self, account, container, swift_client=None, env=None,
                  app=None):
         self.swift_client = swift_client
@@ -40,10 +40,38 @@ class ContainerLifecycle(object):
         self.app = app
         self.headers = None
         self.path = '/v1/%s/%s' % (account, container)
-        self.__initialize()
 
-    def get_action_metadata_by_prefix(self, prefix):
-        rule = self.get_rule_by_prefix(prefix)
+    def _initialize(self):
+        resp = None
+
+        if self.swift_client:
+            resp = self.swift_client.make_request('HEAD', self.path, {},
+                                                  (2, 4))
+        elif self.env:
+            req = Request(self.env)
+            req.method = 'HEAD'
+            req.path_info = self.path
+            resp = req.get_response(self.app)
+
+        if resp is None:
+            return
+
+        self.status = resp.status_int
+
+        if is_success(self.status):
+            self.headers = resp.headers
+
+
+class ContainerLifecycle(LifecycleCommon):
+    def __init__(self, account, container, swift_client=None, env=None,
+                 app=None):
+        LifecycleCommon.__init__(self, account, container,
+                                 swift_client=swift_client,
+                                 env=env, app=app)
+        self._initialize()
+
+    def get_rule_actions_by_object_name(self, prefix):
+        rule = self.get_rule_by_object_name(prefix)
 
         if not rule:
             return None
@@ -52,11 +80,11 @@ class ContainerLifecycle(object):
         rule_info['ID'] = rule['ID']
         for key in rule:
             if key in ('Expiration', 'Transition'):
-                rule_info[key] = rule[key][key.lower()+'-last-modified']
+                rule_info[key] = rule[key][key.lower() + '-last-modified']
 
         return rule_info
 
-    def get_rule_by_prefix(self, prefix):
+    def get_rule_by_object_name(self, prefix):
         lifecycle = self.get_lifecycle()
 
         if not lifecycle:
@@ -78,43 +106,27 @@ class ContainerLifecycle(object):
 
     def get_lifecycle(self):
         if not self.headers or \
-           CONTAINER_LIFECYCLE_SYSMETA not in self.headers:
+                        CONTAINER_LIFECYCLE_SYSMETA not in self.headers:
             return None
 
         return ast.literal_eval(self.headers[CONTAINER_LIFECYCLE_SYSMETA])
 
-    def __initialize(self):
-        if self.swift_client:
-            resp = self.swift_client.make_request('HEAD', self.path, {},
-                                                  (2, 4))
-        elif self.env:
-            req = Request(self.env)
-            req.method = 'HEAD'
-            req.path_info = self.path
-            resp = req.get_response(self.app)
-
-        self.status = resp.status_int
-
-        if is_success(self.status):
-            self.headers = resp.headers
-
     def reload(self):
-        self.__initialize()
+        self._initialize()
 
 
-class ObjectLifecycle(object):
-    def __init__(self, account, container, object, swift_client=None,
+class ObjectLifecycle(LifecycleCommon):
+    def __init__(self, account, container, obj, swift_client=None,
                  env=None, app=None):
-        self.swift_client = swift_client
-        self.env = copy(env)
-        self.app = app
-        self.headers = None
-        self.path = '/v1/%s/%s/%s' % (account, container, object)
-        self.__initialize()
+        LifecycleCommon.__init__(self, account, container,
+                                 swift_client=swift_client,
+                                 env=env, app=app)
+        self.path = '/v1/%s/%s/%s' % (account, container, obj)
+        self._initialize()
 
-    def get_object_lifecycle_meta(self):
+    def get_rule_actions(self):
         if not self.headers or \
-           OBJECT_LIFECYCLE_META['id'] not in self.headers:
+                        OBJECT_LIFECYCLE_META['id'] not in self.headers:
             return None
 
         lifecycle = dict()
@@ -125,7 +137,7 @@ class ObjectLifecycle(object):
                 lifecycle[key.split('-', 5)[4]] = value
         return lifecycle
 
-    def get_status(self):
+    def get_s3_storage_class(self):
         if not self.headers:
             return None
 
@@ -133,92 +145,78 @@ class ObjectLifecycle(object):
             return 'GLACIER'
         return 'STANDARD'
 
-    def __initialize(self):
-        if self.swift_client:
-            resp = self.swift_client.make_request('HEAD', self.path, {},
-                                                  (2, 4))
-        elif self.env:
-            req = Request(self.env)
-            req.method = 'HEAD'
-            req.path_info = self.path
-            resp = req.get_response(self.app)
-
-        self.status = resp.status_int
-
-        if is_success(self.status):
-            self.headers = resp.headers
-
     def reload(self):
-        self.__initialize()
+        self._initialize()
 
 
-class Object(object):
-    def __init__(self, account, container, object, swift_client=None,
+class Lifecycle(object):
+    def __init__(self, account, container, obj, swift_client=None,
                  env=None, app=None):
         self.swift_client = swift_client
         self.env = env
         self.app = app
-        self.account = account
-        self.container = container
-        self.object = object
-        self.o_lifecycle = ObjectLifecycle(account, container, object,
-                                           swift_client=swift_client,
-                                           env=env, app=app)
-        self.c_lifecycle = ContainerLifecycle(account, container,
-                                              swift_client=swift_client,
-                                              env=env, app=app)
+        self.object = ObjectLifecycle(account, container, obj, env=env,
+                                      app=app, swift_client=swift_client)
+        self.container = ContainerLifecycle(account, container, env=env,
+                                            app=app,
+                                            swift_client=swift_client)
 
-    def get_object_status(self):
-        return self.o_lifecycle.get_status()
+    def get_s3_storage_class(self):
+        return self.object.get_s3_storage_class()
 
     def get_object_lifecycle(self):
-        lifecycle = self.c_lifecycle.get_lifecycle()
+        lifecycle = self.container.get_lifecycle()
 
-        object_meta = self.o_lifecycle.get_object_lifecycle_meta()
+        object_meta = self.object.get_rule_actions()
 
         if not lifecycle or not object_meta:
             return None
 
-        id = object_meta['ID']
-        return lifecycle[map(itemgetter('ID'), lifecycle).index(id)]
+        rule_id = object_meta['ID']
+        rule_id_map = map(itemgetter('ID'), lifecycle)
+
+        if rule_id not in rule_id_map:
+            return None
+
+        return lifecycle[rule_id_map.index(id)]
 
     def object_lifecycle_validation(self):
-        container = \
-            self.c_lifecycle.get_action_metadata_by_prefix(self.object)
-        object = self.o_lifecycle.get_object_lifecycle_meta()
+        obj_name = self.object
+        c_rule = self.container.get_rule_actions_by_object_name(obj_name)
+        o_rule = self.object.get_rule_actions()
 
-        if container:
-            if object:
-                if container == object:
+        if c_rule:
+            if o_rule:
+                if c_rule == o_rule:
                     return LIFECYCLE_OK
 
                 for key in ('Expiration', 'Transition'):
-                    if (key not in container and
-                       key in object) or \
-                        (key in container and
-                         key not in object):
+                    if (key not in c_rule and
+                                key in o_rule) or \
+                            (key in c_rule and
+                                     key not in o_rule):
                         return CONTAINER_LIFECYCLE_IS_UPDATED
 
-                    elif key not in container and key not in object:
+                    elif key not in c_rule and key not in o_rule:
                         continue
 
-                    if container[key] == object[key]:
+                    if c_rule[key] == o_rule[key]:
                         continue
-                    elif container[key] > object[key]:
+                    elif c_rule[key] > o_rule[key]:
                         return CONTAINER_LIFECYCLE_IS_UPDATED
-                    elif container[key] < object[key]:
+                    elif c_rule[key] < o_rule[key]:
                         return LIFECYCLE_ERROR
             else:
                 return OBJECT_LIFECYCLE_NOT_EXIST
         else:
-            if object:
+            if o_rule:
                 return CONTAINER_LIFECYCLE_NOT_EXIST
             else:
                 return LIFECYCLE_NOT_EXIST
 
     def reload(self):
-        self.o_lifecycle.reload()
-        self.c_lifecycle.reload()
+        self.object.reload()
+        self.container.reload()
 
 
 def calc_when_actions_do(rule, from_time):
@@ -228,18 +226,19 @@ def calc_when_actions_do(rule, from_time):
         if key not in rule:
             continue
         action = rule[key]
+        time = None
         if 'Date' in action:
             time = calendar.timegm(datetime.strptime(action['Date'],
                                                      '%Y-%m-%dT%H:%M:%S+00:00')
                                    .timetuple())
         elif 'Days' in action:
-            time = calc_nextDay(from_time) + int(action['Days']) * day_seconds
+            time = calc_nextDay(from_time) + int(action['Days']) * DAYS_SECONDS
             time = normalize_delete_at_timestamp(time)
         timelist[key] = time
     return timelist
 
 
 def calc_nextDay(timestamp):
-    current = normalize_delete_at_timestamp(int(timestamp) / day_seconds *
-                                            day_seconds)
-    return int(current) + day_seconds
+    current = normalize_delete_at_timestamp((int(timestamp) / DAYS_SECONDS) *
+                                            DAYS_SECONDS)
+    return int(current) + DAYS_SECONDS

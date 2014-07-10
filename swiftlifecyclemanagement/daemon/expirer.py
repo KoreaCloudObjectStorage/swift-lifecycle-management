@@ -11,7 +11,7 @@ from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
 from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT
 
-from swiftlifecyclemanagement.common.lifecycle import Object, LIFECYCLE_OK, calc_when_actions_do
+from swiftlifecyclemanagement.common.lifecycle import Lifecycle, LIFECYCLE_OK, calc_when_actions_do
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
 
 
@@ -180,12 +180,13 @@ class ObjectExpirer(Daemon):
         start_time = time()
         try:
             account, container, object = self.split_object_path(obj)
-            o = Object(account, container, object, swift_client=self.swift)
-            object_header = o.o_lifecycle.headers
-            object_rule = o.get_object_lifecycle()
+            lifecycle = Lifecycle(account, container, object,
+                                  swift_client=self.swift)
+            object_header = lifecycle.object.headers
+            object_rule = lifecycle.get_object_lifecycle()
             last_modified = gmt_to_timestamp(object_header['Last-Modified'])
 
-            validation_flg = o.object_lifecycle_validation()
+            validation_flg = lifecycle.object_lifecycle_validation()
             if validation_flg == LIFECYCLE_OK:
                 times = calc_when_actions_do(object_rule, last_modified)
                 actual_expire_time = int(times['Expiration'])

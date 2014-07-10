@@ -20,7 +20,7 @@ from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
 from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, \
     updateLifecycleMetadata, validationCheck, is_lifecycle_in_header, \
     make_object_metadata_from_rule
-from swiftlifecyclemanagement.common.lifecycle import Object,\
+from swiftlifecyclemanagement.common.lifecycle import Lifecycle,\
     CONTAINER_LIFECYCLE_NOT_EXIST, \
     LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
     CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, LIFECYCLE_OK, \
@@ -57,12 +57,12 @@ class ObjectController(WSGIContext):
         self.container_ring = Ring('/etc/swift', ring_name='container')
 
     def GETorHEAD(self, env, start_response):
-        o = Object(self.account, self.container, self.object, env=env,
-                   app=self.app)
+        lifecycle = Lifecycle(self.account, self.container, self.object,
+                              env=env, app=self.app)
 
-        http_status = o.o_lifecycle.status
-        headers = o.o_lifecycle.headers
-        object_status = o.get_s3_storage_class()
+        http_status = lifecycle.object.status
+        headers = lifecycle.object.headers
+        object_s3_storage_class = lifecycle.get_s3_storage_class()
 
         if http_status is not HTTP_OK:
             return Response(status=http_status)
@@ -70,7 +70,7 @@ class ObjectController(WSGIContext):
         last_modified = gmt_to_timestamp(headers['Last-Modified'])
 
         is_glacier = False
-        if object_status == 'GLACIER' and \
+        if object_s3_storage_class == 'GLACIER' and \
            'X-Object-Meta-S3-Restore' not in headers:
             is_glacier = True
 
@@ -87,7 +87,7 @@ class ObjectController(WSGIContext):
             resp.headers[LIFECYCLE_RESPONSE_HEADER] = True
             return resp
 
-        obj_lc_status = o.object_lifecycle_validation()
+        obj_lc_status = lifecycle.object_lifecycle_validation()
 
         if obj_lc_status == CONTAINER_LIFECYCLE_NOT_EXIST:
             # Setting Object's Lifecycle to empty
@@ -99,7 +99,7 @@ class ObjectController(WSGIContext):
         elif obj_lc_status in (OBJECT_LIFECYCLE_NOT_EXIST,
                                CONTAINER_LIFECYCLE_IS_UPDATED):
             # Make new object metadata
-            object_rule = o.c_lifecycle.get_rule_by_prefix(self.object)
+            object_rule = lifecycle.container.get_rule_by_object_name(self.object)
             new_header = make_object_metadata_from_rule(object_rule)
             actionList = calc_when_actions_do(object_rule, last_modified)
 
@@ -130,8 +130,8 @@ class ObjectController(WSGIContext):
                                  CONTAINER_LIFECYCLE_IS_UPDATED):
             return resp
 
-        o.reload()
-        object_lifecycle = o.get_object_lifecycle()
+        lifecycle.reload()
+        object_lifecycle = lifecycle.get_object_lifecycle()
         if 'Expiration' in object_lifecycle:
             actions = calc_when_actions_do(object_lifecycle, last_modified)
             expire_at = actions['Expiration']

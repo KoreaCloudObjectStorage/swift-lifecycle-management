@@ -129,8 +129,6 @@ def updateLifecycleMetadata(prevLifecycle, currLifecycle):
     :param currLifecycle:
     :return:
     '''
-
-    prevLifecycle = ast.literal_eval(prevLifecycle)
     for prev, curr in _iter_same_id(prevLifecycle, currLifecycle):
         for key, value in curr.iteritems():
             if key not in prev:

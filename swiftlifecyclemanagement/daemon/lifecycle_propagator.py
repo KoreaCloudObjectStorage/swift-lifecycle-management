@@ -20,7 +20,7 @@ from swift.common.utils import get_logger, dump_recon_cache, \
     normalize_timestamp
 
 from swiftlifecyclemanagement.common.lifecycle import \
-    CONTAINER_LIFECYCLE_SYSMETA, Object, \
+    CONTAINER_LIFECYCLE_SYSMETA, Lifecycle, \
     OBJECT_LIFECYCLE_NOT_EXIST, LIFECYCLE_OK, LIFECYCLE_ERROR, \
     CONTAINER_LIFECYCLE_IS_UPDATED, calc_when_actions_do
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
@@ -190,7 +190,7 @@ class LifecyclePropagator(Daemon):
         objects = self.get_objects_by_prefix(account, container, prefix)
         propagated = True
         for o in objects:
-            lc = Object(account, container, o, swift_client=self.swift)
+            lc = Lifecycle(account, container, o, swift_client=self.swift)
 
             validation_flg = lc.object_lifecycle_validation()
             if validation_flg is LIFECYCLE_OK:
@@ -210,7 +210,7 @@ class LifecyclePropagator(Daemon):
             if not is_success(is_updated):
                 propagated = False
 
-            obj_last_modi = lc.o_lifecycle.headers['Last-Modified']
+            obj_last_modi = lc.object.headers['Last-Modified']
             obj_last_modi = gmt_to_timestamp(obj_last_modi)
             actionList = calc_when_actions_do(rule, obj_last_modi)
             for action, at_time in actionList.iteritems():
