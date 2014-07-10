@@ -125,7 +125,7 @@ class ObjectLifecycle(LifecycleCommon):
         self.obj_name = obj;
         self._initialize()
 
-    def get_rule_actions(self):
+    def get_rules_actions(self):
         if not self.headers or \
                         OBJECT_LIFECYCLE_META['id'] not in self.headers:
             return None
@@ -168,7 +168,7 @@ class Lifecycle(object):
     def get_object_lifecycle(self):
         lifecycle = self.container.get_lifecycle()
 
-        object_meta = self.object.get_rule_actions()
+        object_meta = self.object.get_rules_actions()
 
         if not lifecycle or not object_meta:
             return None
@@ -184,7 +184,7 @@ class Lifecycle(object):
     def object_lifecycle_validation(self):
         obj_name = self.object.obj_name
         c_rule = self.container.get_rule_actions_by_object_name(obj_name)
-        o_rule = self.object.get_rule_actions()
+        o_rule = self.object.get_rules_actions()
 
         if c_rule:
             if o_rule:
