@@ -84,7 +84,7 @@ class ContainerLifecycle(LifecycleCommon):
 
         return rule_info
 
-    def get_rule_by_object_name(self, prefix):
+    def get_rule_by_object_name(self, obj_name):
         lifecycle = self.get_lifecycle()
 
         if not lifecycle:
@@ -94,7 +94,7 @@ class ContainerLifecycle(LifecycleCommon):
 
         prefixIndex = -1
         for p in prefixMap:
-            if prefix.startswith(p):
+            if obj_name.startswith(p):
                 prefixIndex = prefixMap.index(p)
                 break
 
@@ -122,6 +122,7 @@ class ObjectLifecycle(LifecycleCommon):
                                  swift_client=swift_client,
                                  env=env, app=app)
         self.path = '/v1/%s/%s/%s' % (account, container, obj)
+        self.obj_name = obj;
         self._initialize()
 
     def get_rule_actions(self):
@@ -181,7 +182,7 @@ class Lifecycle(object):
         return lifecycle[rule_id_map.index(id)]
 
     def object_lifecycle_validation(self):
-        obj_name = self.object
+        obj_name = self.object.obj_name
         c_rule = self.container.get_rule_actions_by_object_name(obj_name)
         o_rule = self.object.get_rule_actions()
 
