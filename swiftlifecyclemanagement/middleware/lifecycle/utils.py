@@ -146,7 +146,7 @@ def check_lifecycle_validation(rulelist):
 
     # TODO 1000개가 넘을 경우 정확히 어떤 메세지가 오는지 확인해야함.
     if length > 1000:
-        exceptionMsg = dict();
+        exceptionMsg = dict()
         exceptionMsg['code'] = "OverUploadedRules"
         exceptionMsg['msg'] = "1000"
         raise LifecycleConfigException(exceptionMsg)
@@ -253,11 +253,14 @@ def is_lifecycle_in_header(headers):
         return True
     return False
 
+
 def make_object_metadata_from_rule(rule):
     headers = dict()
     headers[OBJECT_LIFECYCLE_META['ID']] = rule['ID']
 
     for key in ('Expiration', 'Transition'):
+        if key not in rule:
+            continue
         action = rule[key]
         headers[OBJECT_LIFECYCLE_META[key]] = action['LastModified']
 
