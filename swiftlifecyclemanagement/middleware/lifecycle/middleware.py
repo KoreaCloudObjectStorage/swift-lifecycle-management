@@ -344,7 +344,7 @@ class LifecycleManageController(WSGIContext):
             return Response(status=container_lc.status)
 
         if not lifecycle:
-            return Response()
+            return Response(status=HTTP_NO_CONTENT)
 
         req = Request(copy(env))
         if 'lifecycle' in req.params:
@@ -353,8 +353,8 @@ class LifecycleManageController(WSGIContext):
             req.headers[CONTAINER_LIFECYCLE_SYSMETA] = 'None'
             req.get_response(self.app)
         elif 'lifecycle_rule' in req.params:
-            id = req.params['lifecycle_rule']
-            filtered_lc = filter(lambda x: x.get('ID') != id, lifecycle)
+            rule_id = req.params['lifecycle_rule']
+            filtered_lc = filter(lambda x: x.get('ID') != rule_id, lifecycle)
 
             if not filtered_lc:
                 filtered_lc = 'None'
