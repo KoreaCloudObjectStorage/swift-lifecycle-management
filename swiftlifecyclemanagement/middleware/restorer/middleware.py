@@ -82,7 +82,6 @@ class RestoreMiddleware(object):
                                            request=Request(env))
         ori_meta = disk_file.read_metadata()
         metadata = ori_meta
-        print metadata
         metadata.update(val for val in req.headers.iteritems()
                         if is_user_meta('object', val[0]))
 
@@ -92,7 +91,7 @@ class RestoreMiddleware(object):
         return HTTPCreated(request=req, etag=ori_meta['ETag'])
 
     def get_diskfile(self, device, partition, account, container, obj,
-                    **kwargs):
+                     **kwargs):
         return self._diskfile_mgr.get_diskfile(device, partition, account,
                                                container, obj, **kwargs)
 
