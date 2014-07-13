@@ -1,12 +1,10 @@
 # coding=utf-8
-import ast
 import time
 import xml.etree.ElementTree as ET
 import urlparse
 from urllib2 import unquote
 from operator import itemgetter
 from copy import copy
-
 from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path, \
     normalize_timestamp
@@ -15,17 +13,16 @@ from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK, \
     HTTP_FORBIDDEN, HTTP_BAD_REQUEST
 from swift.common.ring import Ring
 from swift.common.bufferedhttp import http_connect
+from swift.common.request_helpers import is_user_meta
+
 from exceptions import LifecycleConfigException
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
-from utils import xml_to_list, dict_to_xml, list_to_xml, get_status_int, \
-    updateLifecycleMetadata, validationCheck, is_lifecycle_in_header, \
-    make_object_metadata_from_rule
+from utils import xml_to_list, lifecycle_to_xml, get_status_int, \
+    updateLifecycleMetadata, check_lifecycle_validation, make_object_metadata_from_rule
 from swiftlifecyclemanagement.common.lifecycle import Lifecycle,\
     CONTAINER_LIFECYCLE_NOT_EXIST, \
     LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
-    CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, LIFECYCLE_OK, \
-    CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do
-from swift.common.request_helpers import is_user_meta
+    CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do, LIFECYCLE_NOT_EXIST, ContainerLifecycle
 
 
 def get_err_response(err):
@@ -37,7 +34,7 @@ def get_err_response(err):
     """
 
     resp = Response(content_type='text/xml')
-    resp.status = err['code']
+    resp.status = err['status']
     resp.body = """<?xml version="1.0" encoding="UTF-8"?>
                    <Error><Code>%s</Code><Message>%s</Message></Error>""" \
                 % (err['code'], err['msg'])
@@ -125,9 +122,8 @@ class ObjectController(WSGIContext):
         req = Request(env)
         resp = req.get_response(self.app)
 
-        if obj_lc_status not in (LIFECYCLE_OK,
-                                 OBJECT_LIFECYCLE_NOT_EXIST,
-                                 CONTAINER_LIFECYCLE_IS_UPDATED):
+        if obj_lc_status in (LIFECYCLE_NOT_EXIST,
+                             CONTAINER_LIFECYCLE_NOT_EXIST):
             return resp
 
         lifecycle.reload()
@@ -163,22 +159,15 @@ class ObjectController(WSGIContext):
         return Response(status=HTTP_BAD_REQUEST)
 
     def PUT(self, env, start_response):
-        req = Request(copy(env))
-        req.method = 'HEAD'
-        req.path_info = '/v1/%s/%s' % (self.account, self.container)
-        container = req.get_response(self.app)
-        status = get_status_int(container.status)
-        if status is not HTTP_NO_CONTENT:
-            return container
+        container_lc = ContainerLifecycle(self.account, self.container,
+                                          env=env, app=self.app)
+
+        lifecycle = container_lc.get_lifecycle()
+        if not lifecycle:
+            return self.app
 
         actionList = dict()
         headers = dict()
-
-        if not is_lifecycle_in_header(container.headers):
-            return self.app
-
-        lifecycle = container.headers[CONTAINER_LIFECYCLE_SYSMETA]
-        lifecycle = ast.literal_eval(lifecycle)
 
         for rule in lifecycle:
             prefix = rule['Prefix']
@@ -295,6 +284,7 @@ class ObjectController(WSGIContext):
             response = conn.getresponse()
             response.read()
 
+
 class LifecycleManageController(WSGIContext):
     def __init__(self, app, account, container_name, **kwargs):
         WSGIContext.__init__(self, app)
@@ -304,44 +294,37 @@ class LifecycleManageController(WSGIContext):
         self.container = container_name
 
     def GET(self, env, start_response):
-        req = Request(env)
+        container_lc = ContainerLifecycle(self.account, self.container,
+                                          env=env, app=self.app)
 
-        req.method = 'HEAD'
+        lifecycle = container_lc.get_lifecycle()
 
-        resp = req.get_response(self.app)
-        status = get_status_int(resp.status)
-        req.method = 'GET'
+        if container_lc.status != HTTP_NO_CONTENT:
+            return Response(status=container_lc.status)
 
-        if status is not HTTP_NO_CONTENT:
-            return resp
-
-        if is_lifecycle_in_header(resp.headers):
-            lifecycle = resp.headers[CONTAINER_LIFECYCLE_SYSMETA]
-
-        else:
-            container, obj = split_path(req.path, 0, 2, True)
-
+        if not lifecycle:
             resp = Response(content_type='text/xml')
             resp.status = HTTP_NOT_FOUND
             resp.body = '<?xml version="1.0" encoding="UTF-8"?>' \
                         '<Error><Code>NoSuchLifecycleConfiguration</Code>' \
                         '<Message>The lifecycle configuration' \
                         ' does not exist</Message>' \
-                        '<BucketName>%s</BucketName></Error>' % container
+                        '<BucketName>%s</BucketName></Error>' % self.container
             resp.headers[LIFECYCLE_RESPONSE_HEADER] = True
             return resp
 
-        lifecycle = ast.literal_eval(lifecycle)
-
+        req = Request(copy(env))
         if 'lifecycle' in req.params:
-            lifecycle = list_to_xml(lifecycle)
+            lifecycle = lifecycle_to_xml(lifecycle)
 
         elif 'lifecycle_rule' in req.params:
             try:
                 lc_map = map(itemgetter('ID'), lifecycle)
                 index = lc_map.index(req.params['lifecycle_rule'])
-                lifecycle = lifecycle[index]
-                lifecycle = dict_to_xml(lifecycle)
+                rule = lifecycle[index]
+                lifecycle = list()
+                lifecycle.append(rule)
+                lifecycle = lifecycle_to_xml(lifecycle)
             except Exception as e:
                 # TODO rule 별 조회시 해당 ID가 없을 경우 메세지 내용 알아보기
                 return Response(status=400, body=e.message,
@@ -352,165 +335,83 @@ class LifecycleManageController(WSGIContext):
         return ret
 
     def DELETE(self, env, start_response):
+        container_lc = ContainerLifecycle(self.account, self.container,
+                                          env=env, app=self.app)
+
+        lifecycle = container_lc.get_lifecycle()
+
+        if container_lc.status != HTTP_NO_CONTENT:
+            return Response(status=container_lc.status)
+
+        if not lifecycle:
+            return Response()
+
         req = Request(copy(env))
-        req.method = 'HEAD'
-        resp = req.get_response(self.app)
+        if 'lifecycle' in req.params:
+            req = Request(copy(env))
+            req.method = 'POST'
+            req.headers[CONTAINER_LIFECYCLE_SYSMETA] = 'None'
+            req.get_response(self.app)
+        elif 'lifecycle_rule' in req.params:
+            id = req.params['lifecycle_rule']
+            filtered_lc = filter(lambda x: x.get('ID') != id, lifecycle)
 
-        status = get_status_int(resp.status)
+            if not filtered_lc:
+                filtered_lc = 'None'
 
-        if status is not HTTP_NO_CONTENT:
-            return resp
-
-        if CONTAINER_LIFECYCLE_SYSMETA in resp.headers:
-
-            if 'lifecycle' in req.params:
-                req = Request(copy(env))
-                req.method = 'POST'
-                req.headers[CONTAINER_LIFECYCLE_SYSMETA] = 'None'
-                req.get_response(self.app)
-            elif 'lifecycle_rule' in req.params:
-                id = req.params['lifecycle_rule']
-                lifecycle = ast.literal_eval(resp.headers[CONTAINER_LIFECYCLE_SYSMETA])
-                newlifecycle = filter(lambda x : x.get('ID') != id, lifecycle)
-                if not newlifecycle:
-                    newlifecycle = 'None'
-
-                req = Request(copy(env))
-                req.method = 'POST'
-                req.headers[CONTAINER_LIFECYCLE_SYSMETA] = newlifecycle
-                req.get_response(self.app)
+            req = Request(copy(env))
+            req.method = 'POST'
+            req.headers[CONTAINER_LIFECYCLE_SYSMETA] = filtered_lc
+            req.get_response(self.app)
 
         return Response(status=HTTP_NO_CONTENT)
-
 
     def PUT(self, env, start_response):
         try:
             req = Request(copy(env))
             lifecycle_xml = req.body
             lifecycle = xml_to_list(lifecycle_xml)
-            # 이전 Lifecycle을 가져옴
 
-            req.method = "HEAD"
-            resp = req.get_response(self.app)
-            resp_status = get_status_int(resp.status)
+            container_lc = ContainerLifecycle(self.account, self.container,
+                                              env=env, app=self.app)
 
-            if resp_status is not HTTP_NO_CONTENT:
-                return resp
+            prevLifecycle = container_lc.get_lifecycle()
 
-            prevLifecycle = None
-            if is_lifecycle_in_header(resp.headers):
-                prevLifecycle = resp.headers[CONTAINER_LIFECYCLE_SYSMETA]
+            if container_lc.status != HTTP_NO_CONTENT:
+                return Response(status=container_lc.status)
 
-            if 'lifecycle' in req.params:
+            if not prevLifecycle:
+                prevLifecycle = list()
 
-                if prevLifecycle is not None:
-                    prevLifecycle = ast.literal_eval(prevLifecycle)
-                    updateLifecycleMetadata(prevLifecycle, lifecycle)
-
-                # Rule이 올바르게 설정되어 있는 지 검사
-                validationCheck(lifecycle)
-
-                # 새로운 lifecycle로 변경
-                req = Request(copy(env))
-                req.method = "POST"
-                req.headers[CONTAINER_LIFECYCLE_SYSMETA] = lifecycle
-
-                resp = req.get_response(self.app)
-                resp_status = get_status_int(resp.status)
-
-                if resp_status is not HTTP_NO_CONTENT:
-                    return resp
-
-            elif 'lifecycle_rule' in req.params:
+            if 'lifecycle_rule' in req.params:
                 if len(lifecycle) > 1:
                     exceptMsg = dict()
                     exceptMsg['status'] = 400
                     exceptMsg['code'] = 'InvalidRequest'
                     exceptMsg['msg'] = 'more than one rule was uploaded'
                     raise LifecycleConfigException(exceptMsg)
+                updateLifecycleMetadata(prevLifecycle, lifecycle)
+                prevLifecycle.append(lifecycle[0])
+                lifecycle = prevLifecycle
 
-                rule = lifecycle[0]
-                prefix = rule['Prefix']
-                if prevLifecycle:
+            if 'lifecycle' in req.params:
+                updateLifecycleMetadata(prevLifecycle, lifecycle)
 
-                    prevLifecycle = ast.literal_eval(prevLifecycle)
-                    if any(r['ID'] == rule['ID'] for r in prevLifecycle):
-                        # TODO ID 가 같아도, 안의 설정에 따라서 오류, 정상 처리 적용하기
-                        message = '<?xml version="1.0" encoding="UTF-8"?>' \
-                                  '<Error><Code>InvalidArgument</Code>' \
-                                  '<Message>Rule ID must be unique. ' \
-                                  'Found same ID ' \
-                                  'for more than one rule</Message>' \
-                                  '<ArgumentValue>%s</ArgumentValue>' \
-                                  '<ArgumentName>ID</ArgumentName>' \
-                                  % rule['ID']
-                        req.method = 'PUT'
-                        return Response(status=400, body=message,
-                                        headers={
-                                            LIFECYCLE_RESPONSE_HEADER: True
-                                        })
+            check_lifecycle_validation(lifecycle)
 
-                    for prev in prevLifecycle:
-                        if prefix.startswith(prev['Prefix']) or\
-                           prev['Prefix'].startswith(prefix):
-                            if 'Transition' in rule.keys() and \
-                               'Transition' in prev.keys():
-                                exceptMsg = dict()
-                                exceptMsg['status'] = 400
-                                exceptMsg['code'] = 'InvalidRequest'
-                                exceptMsg['msg'] = \
-                                    'Found overlapping prefixes \'%s\' ' \
-                                    'and \'%s\' for same action type \'%s\'' \
-                                    % (prefix, prev['Prefix'], 'Transition')
-                                raise LifecycleConfigException(exceptMsg)
+            # 새로운 lifecycle로 변경
+            req = Request(copy(env))
+            req.method = "POST"
+            req.headers[CONTAINER_LIFECYCLE_SYSMETA] = lifecycle
 
-                            if 'Expiration' in rule.keys() and \
-                               'Expiration' in prev.keys():
-                                exceptMsg = dict()
-                                exceptMsg['status'] = 400
-                                exceptMsg['code'] = 'InvalidRequest'
-                                exceptMsg['msg'] = 'Found overlapping ' \
-                                                   'prefixes \'%s\' and ' \
-                                                   '\'%s\' for same ' \
-                                                   'action type \'%s\'' \
-                                                   % (prefix,
-                                                      prev['Prefix'],
-                                                      'Expiration')
-                                raise LifecycleConfigException(exceptMsg)
+            resp = req.get_response(self.app)
+            resp_status = get_status_int(resp.status)
+            if resp_status is not HTTP_NO_CONTENT:
+                return resp
 
-                            if 'Expiration' in (rule.keys() or prev.keys()) \
-                                and \
-                               'Transition' in (rule.keys() or prev.keys()):
-
-                                if 'Days' in (rule.keys() or prev.keys()) and \
-                                   'Date' in (rule.keys() or prev.keys()):
-                                    exceptMsg = dict()
-                                    exceptMsg['status'] = 400
-                                    exceptMsg['code'] = 'InvalidRequest'
-                                    exceptMsg['msg'] = \
-                                        'Found mixed \'Date\' and \'Days\' ' \
-                                        'based Expiration and Transition ' \
-                                        'actions in lifecycle rule for ' \
-                                        'prefix \'%s\'' % prefix
-                                    raise LifecycleConfigException(exceptMsg)
-
-                else:
-                    prevLifecycle = list()
-
-                prevLifecycle.append(rule)
-                req = Request(copy(env))
-                req.method = "POST"
-                req.headers[CONTAINER_LIFECYCLE_SYSMETA] = prevLifecycle
-                resp = req.get_response(self.app)
-                resp_status = get_status_int(resp.status)
-
-                if resp_status is not HTTP_NO_CONTENT:
-                    return resp
-
+            self.update_hidden_s3_account(self.account, self.container)
         except LifecycleConfigException as e:
-            env['REQUEST_METHOD'] = 'PUT'
             return get_err_response(e.message)
-        self.update_hidden_s3_account(self.account, self.container)
         return Response(status=200, app_iter='True',
                         headers={LIFECYCLE_RESPONSE_HEADER: True})
 
@@ -540,7 +441,7 @@ class LifecycleMiddleware(object):
     def __init__(self, app, conf, *args, **kwargs):
         self.app = app
         self.conf = conf
-        self.logger = get_logger(self.conf, log_route='swift3')
+        self.logger = get_logger(self.conf, log_route='lifecycle')
 
     def get_controller(self, env, path):
         req = Request(env)
@@ -549,7 +450,7 @@ class LifecycleMiddleware(object):
              'object_name': unquote(obj) if obj is not None else obj,
              'account': account}
 
-        if container:
+        if container and not obj:
             if 'lifecycle' in req.params or 'lifecycle_rule' in req.params:
                 return LifecycleManageController, d
 
@@ -571,7 +472,7 @@ class LifecycleMiddleware(object):
         if hasattr(controller, req.method):
             res = getattr(controller, req.method)(env, start_response)
         else:
-            return get_err_response({'code': 400,
+            return get_err_response({'status': 400, 'code': 'InvalidURI',
                                      'msg': 'InvalidURI'})(env, start_response)
 
         return res(env, start_response)

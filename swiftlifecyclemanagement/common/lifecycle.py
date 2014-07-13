@@ -15,21 +15,19 @@ LIFECYCLE_ERROR = 1
 LIFECYCLE_NOT_EXIST = 2
 CONTAINER_LIFECYCLE_IS_UPDATED = 3
 CONTAINER_LIFECYCLE_NOT_EXIST = 4
-OBJECT_LIFECYCLE_IS_FUTURE = 5
-OBJECT_LIFECYCLE_NOT_EXIST = 6
-OBJECT_IS_IN_GLACIER = 7
+OBJECT_LIFECYCLE_NOT_EXIST = 5
 
 CONTAINER_LIFECYCLE_SYSMETA = 'X-Container-Sysmeta-S3-Lifecycle-Configuration'
 GLACIER_FLAG_META = 'X-Object-Meta-Glacier'
 LIFECYCLE_RESPONSE_HEADER = 'X-Lifecycle-Response'
 
 OBJECT_LIFECYCLE_META = {
-    'id': 'X-Object-Meta-S3-Lifecycle-Configuration-Rule-Id',
-    'expire-last': 'X-Object-Meta-S3-Expiration-Last-Modified',
-    'transition-last': 'X-Object-Meta-S3-Transition-Last-Modified'
+    'ID': 'X-Object-Meta-S3-Lifecycle-Configuration-Rule-Id',
+    'Expiration': 'X-Object-Meta-S3-Expiration-Last-Modified',
+    'Transition': 'X-Object-Meta-S3-Transition-Last-Modified'
 }
 
-DAYS_SECONDS = 86400
+DAY_SECONDS = 86400
 
 
 class LifecycleCommon(object):
@@ -39,6 +37,7 @@ class LifecycleCommon(object):
         self.env = copy(env)
         self.app = app
         self.headers = None
+        self.status = None
         self.path = '/v1/%s/%s' % (account, container)
 
     def _initialize(self):
@@ -80,7 +79,7 @@ class ContainerLifecycle(LifecycleCommon):
         rule_info['ID'] = rule['ID']
         for key in rule:
             if key in ('Expiration', 'Transition'):
-                rule_info[key] = rule[key][key.lower() + '-last-modified']
+                rule_info[key] = rule[key]['LastModified']
 
         return rule_info
 
@@ -105,8 +104,10 @@ class ContainerLifecycle(LifecycleCommon):
         return rule
 
     def get_lifecycle(self):
-        if not self.headers or \
-                        CONTAINER_LIFECYCLE_SYSMETA not in self.headers:
+        if not self.headers or CONTAINER_LIFECYCLE_SYSMETA not in self.headers:
+            return None
+
+        if self.headers[CONTAINER_LIFECYCLE_SYSMETA] == 'None':
             return None
 
         return ast.literal_eval(self.headers[CONTAINER_LIFECYCLE_SYSMETA])
@@ -127,14 +128,14 @@ class ObjectLifecycle(LifecycleCommon):
 
     def get_rules_actions(self):
         if not self.headers or \
-                        OBJECT_LIFECYCLE_META['id'] not in self.headers:
+           OBJECT_LIFECYCLE_META['ID'] not in self.headers:
             return None
 
         lifecycle = dict()
-        lifecycle['ID'] = self.headers[OBJECT_LIFECYCLE_META['id']]
+        lifecycle['ID'] = self.headers[OBJECT_LIFECYCLE_META['ID']]
         for key, value in self.headers.iteritems():
-            if key in (OBJECT_LIFECYCLE_META['expire-last'],
-                       OBJECT_LIFECYCLE_META['transition-last']):
+            if key in (OBJECT_LIFECYCLE_META['Expiration'],
+                       OBJECT_LIFECYCLE_META['Transition']):
                 lifecycle[key.split('-', 5)[4]] = value
         return lifecycle
 
@@ -168,12 +169,12 @@ class Lifecycle(object):
     def get_object_lifecycle(self):
         lifecycle = self.container.get_lifecycle()
 
-        object_meta = self.object.get_rules_actions()
+        rules_actions = self.object.get_rules_actions()
 
-        if not lifecycle or not object_meta:
+        if not lifecycle or not rules_actions:
             return None
 
-        rule_id = object_meta['ID']
+        rule_id = rules_actions['ID']
         rule_id_map = map(itemgetter('ID'), lifecycle)
 
         if rule_id not in rule_id_map:
@@ -192,10 +193,8 @@ class Lifecycle(object):
                     return LIFECYCLE_OK
 
                 for key in ('Expiration', 'Transition'):
-                    if (key not in c_rule and
-                                key in o_rule) or \
-                            (key in c_rule and
-                                     key not in o_rule):
+                    if (key not in c_rule and key in o_rule) or \
+                       (key in c_rule and key not in o_rule):
                         return CONTAINER_LIFECYCLE_IS_UPDATED
 
                     elif key not in c_rule and key not in o_rule:
@@ -233,13 +232,13 @@ def calc_when_actions_do(rule, from_time):
                                                      '%Y-%m-%dT%H:%M:%S+00:00')
                                    .timetuple())
         elif 'Days' in action:
-            time = calc_nextDay(from_time) + int(action['Days']) * DAYS_SECONDS
+            time = calc_nextDay(from_time) + int(action['Days']) * DAY_SECONDS
             time = normalize_delete_at_timestamp(time)
         actions_timestamp[key] = time
     return actions_timestamp
 
 
 def calc_nextDay(timestamp):
-    current = normalize_delete_at_timestamp((int(timestamp) / DAYS_SECONDS) *
-                                            DAYS_SECONDS)
-    return int(current) + DAYS_SECONDS
+    current = normalize_delete_at_timestamp((int(timestamp) / DAY_SECONDS) *
+                                            DAY_SECONDS)
+    return int(current) + DAY_SECONDS
