@@ -179,7 +179,7 @@ class ObjectExpirer(Daemon):
     def delete_object(self, hidden_container, obj):
         start_time = time()
         try:
-            account, container, object = self.split_object_path(obj)
+            account, container, object = obj.split('/', 2)
             lifecycle = Lifecycle(account, container, object,
                                   swift_client=self.swift)
             object_header = lifecycle.object.headers
@@ -217,6 +217,3 @@ class ObjectExpirer(Daemon):
         path = '/v1/' + urllib.quote(obj.lstrip('/'))
         self.swift.make_request('DELETE', path,
                                 {}, (2, HTTP_NOT_FOUND))
-
-    def split_object_path(self, obj_path):
-        return obj_path.split('/', 2)
