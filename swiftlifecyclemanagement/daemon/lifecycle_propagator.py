@@ -54,9 +54,6 @@ class LifecyclePropagator(Daemon):
         self.processes = int(self.conf.get('processes', 0))
         self.process = int(self.conf.get('process', 0))
 
-    def __call__(self):
-        super.__call__(self)
-
     def report(self, final=False):
         """
         Emits a log line report of the progress so far, or the final progress
@@ -149,7 +146,7 @@ class LifecyclePropagator(Daemon):
         # Update Container lifecycle
         cpath = '/v1/%s/%s' % (account, container)
         self.swift.make_request('POST', cpath, {CONTAINER_LIFECYCLE_SYSMETA:
-                                rules}, (2,))
+                                lifecycle}, (2,))
 
     def get_process_values(self, kwargs):
         """
@@ -240,11 +237,8 @@ class LifecyclePropagator(Daemon):
             for key, value in rule.iteritems():
                 if type(value) is not dict:
                     continue
-                for subkey, subvalue in value.iteritems():
-                    if not subkey.endswith('-propagated'):
-                        continue
-                    if not to_append and subvalue == '0':
-                        to_append = True
+                if not rule[key]['Propagated']:
+                    to_append = True
             if to_append:
                 result.append(rule)
             to_append = False
@@ -275,11 +269,7 @@ class LifecyclePropagator(Daemon):
         for key, value in rule.iteritems():
             if type(value) is not dict:
                 continue
-            for subkey, subvalue in value.iteritems():
-                if not subkey.endswith('-propagated'):
-                    continue
-                rule[key][subkey] = '1'
-                break
+            rule[key]['Propagated'] = True
 
     def update_object_metadata(self, account, container, obj, headers):
         path = '/v1/%s/%s/%s' % (account, container, obj)

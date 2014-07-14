@@ -20,7 +20,7 @@ class TransitionMiddleware(object):
         self.logger = get_logger(self.conf, log_route='transition')
         self.container_ring = Ring('/etc/swift', ring_name='container')
         self.glacier_account_prefix = '.glacier_'
-        self.temp_path = '/home/vagrant/test/'
+        self.temp_path = conf.get('temp_path', '/home/vagrant/test/')
         self.glacier = self._init_glacier()
 
     def _init_glacier(self):

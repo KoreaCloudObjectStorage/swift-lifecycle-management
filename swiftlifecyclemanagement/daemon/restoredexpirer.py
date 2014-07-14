@@ -222,5 +222,8 @@ class RestoredObjectExpirer(Daemon):
         account, container, object = actual_obj.split('/', 2)
         metadata = self.swift.get_object_metadata(account, container, object,
                                                   'X-Object-Meta')
+        metadata = {'X-Object-Meta'+key: value for key, value in metadata
+                    .iteritems()}
+        del metadata['X-Object-Meta-S3-Restore']
         self.swift.make_request('POST', path, metadata,
                                 (2, HTTP_NOT_FOUND, HTTP_PRECONDITION_FAILED))
