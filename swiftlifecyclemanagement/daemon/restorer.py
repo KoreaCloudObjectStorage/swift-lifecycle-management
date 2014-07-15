@@ -275,6 +275,7 @@ class ObjectRestorer(Daemon):
         metadata['X-Object-Meta-s3-restore'] = 'ongoing-request="false" ' \
                                                'expiry-date=%s' % expire_date
         metadata['Content-Length'] = os.path.getsize(tmppath)
+        del metadata['X-Object-Meta-s3-restore-expire-days']
         self.swift.make_request('PUT', path, metadata, (2,),
                                 body_file=obj_body)
 

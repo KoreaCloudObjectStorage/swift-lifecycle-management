@@ -224,6 +224,6 @@ class RestoredObjectExpirer(Daemon):
                                                   'X-Object-Meta')
         metadata = {'X-Object-Meta'+key: value for key, value in metadata
                     .iteritems()}
-        del metadata['X-Object-Meta-S3-Restore']
+        del metadata['X-Object-Meta-s3-restore']
         self.swift.make_request('POST', path, metadata,
                                 (2, HTTP_NOT_FOUND, HTTP_PRECONDITION_FAILED))
