@@ -154,7 +154,7 @@ class ObjectController(WSGIContext):
         else:
             args = {}
 
-        if 'restoring' in args:
+        if 'restore' in args:
             return self.restore_object(env)
         return Response(status=HTTP_BAD_REQUEST)
 
@@ -258,7 +258,8 @@ class ObjectController(WSGIContext):
 
     def _get_days_from_restore_xml(self, body):
         root = ET.fromstring(body)
-        days = int(root.find('Days').text)
+        ns = 'http://s3.amazonaws.com/doc/2006-03-01'
+        days = int(root.find('{%s}Days' % ns).text)
         return days
 
     def start_restoring(self, account, container, object, metadata=None):
