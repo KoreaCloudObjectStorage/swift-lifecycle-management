@@ -143,7 +143,7 @@ class ObjectController(WSGIContext):
         return self.GETorHEAD(env, start_response)
 
     def DELETE(self, env, start_response):
-        return self.app(env, start_response)
+        return self.app
 
     def HEAD(self, env, start_response):
         return self.GETorHEAD(env, start_response)
