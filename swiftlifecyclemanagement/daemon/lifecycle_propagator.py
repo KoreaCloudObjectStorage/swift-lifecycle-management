@@ -211,9 +211,10 @@ class LifecyclePropagator(Daemon):
             metadata = make_object_metadata_from_rule(rule)
             is_updated = self.update_object_metadata(account, container,
                                                      o, metadata)
-            # update가 안되었으면, propagated가 안된 것으로 처리
+            # Object Metadata update가 안되었으면, rule이 propagated 안된 것으로 처리
             if not is_success(is_updated):
                 propagated = False
+                continue
 
             obj_last_modi = lc.object.headers['Last-Modified']
             obj_last_modi = gmt_to_timestamp(obj_last_modi)
@@ -233,11 +234,12 @@ class LifecyclePropagator(Daemon):
         result = list()
         to_append = False
         for rule in lifecycle:
-            for key, value in rule.iteritems():
-                if type(value) is not dict:
+            for key in ('Expiration', 'Transition'):
+                if key not in rule:
                     continue
                 if not rule[key]['Propagated']:
                     to_append = True
+                    break
             if to_append:
                 result.append(rule)
             to_append = False
@@ -265,8 +267,8 @@ class LifecyclePropagator(Daemon):
             yield item
 
     def set_rule_propagated(self, rule):
-        for key, value in rule.iteritems():
-            if type(value) is not dict:
+        for key in ('Expiration', 'Transition'):
+            if key not in rule:
                 continue
             rule[key]['Propagated'] = True
 
