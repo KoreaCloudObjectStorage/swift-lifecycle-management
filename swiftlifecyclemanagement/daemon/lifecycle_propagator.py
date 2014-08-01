@@ -22,7 +22,7 @@ from swift.common.utils import get_logger, dump_recon_cache, \
 from swiftlifecyclemanagement.common.lifecycle import \
     CONTAINER_LIFECYCLE_SYSMETA, Lifecycle, \
     OBJECT_LIFECYCLE_NOT_EXIST, LIFECYCLE_OK, LIFECYCLE_ERROR, \
-    CONTAINER_LIFECYCLE_IS_UPDATED, calc_when_actions_do
+    CONTAINER_LIFECYCLE_IS_UPDATED, calc_when_actions_do, ContainerLifecycle
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
 from swiftlifecyclemanagement.middleware.lifecycle.utils import make_object_metadata_from_rule
 
@@ -103,7 +103,11 @@ class LifecyclePropagator(Daemon):
                         if container_process % processes != process:
                             continue
                     pool.spawn_n(self.propagate_container, container, obj)
-            pool.waitall()
+                pool.waitall()
+
+                # Lifecycle 이 적용된 Container가 없는 Account를 지움
+                self.swift.delete_container(self.s3_accounts, container,
+                                            (2, 4,))
             self.logger.debug(_('Run end'))
             self.report(final=True)
 
@@ -131,10 +135,14 @@ class LifecyclePropagator(Daemon):
                 sleep(random() * (self.interval - elapsed))
 
     def propagate_container(self, account, container):
-        lifecycle = self.get_container_lifecycle(account, container)
-        # 만약 Container 에 LC가 없으면, hidden account 에서 삭제
+        container_lc = ContainerLifecycle(account, container,
+                                          swift_client=self.swift)
+        lifecycle = container_lc.get_lifecycle()
+
+        # 만약 Container 에 LC가 없으면, hidden account 에서 삭제 후 종료
         if not lifecycle:
             self.swift.delete_object(self.s3_accounts, account, container)
+            return
 
         rules = self.get_not_propagated_rules(lifecycle)
         for rule in rules:
@@ -220,15 +228,6 @@ class LifecyclePropagator(Daemon):
                     'object': o
                 })
         return propagated
-
-    def get_container_lifecycle(self, account, container):
-        path = '/v1/%s/%s' % (account, container)
-        resp = self.swift.make_request('HEAD', path, {}, (2, 4))
-
-        if CONTAINER_LIFECYCLE_SYSMETA not in resp.headers:
-            return None
-
-        return ast.literal_eval(resp.headers[CONTAINER_LIFECYCLE_SYSMETA])
 
     def get_not_propagated_rules(self, lifecycle):
         result = list()
