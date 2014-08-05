@@ -15,6 +15,7 @@
 # limitations under the License.
 from boto.glacier.layer2 import Layer2
 import os
+import tempfile
 
 from random import random
 from swift.common.bufferedhttp import http_connect
@@ -55,7 +56,7 @@ class ObjectRestorer(Daemon):
         conf_path = '/etc/swift/s3-object-restorer.conf'
         request_tries = int(conf.get('request_tries') or 3)
         self.glacier = self._init_glacier()
-        self.glacier_tmpdir = '/home/vagrant/test/restore/'
+        self.glacier_tmpdir = conf.get('temp_path', '/var/cache/s3/')
         self.swift = InternalClient(conf_path,
                                     'Swift Object Restorer',
                                     request_tries)
@@ -208,7 +209,7 @@ class ObjectRestorer(Daemon):
             archiveId = self.get_archiveid(account, container, object)
             jobId = self.glacier.retrieve_archive(archiveId).id
             restoring_obj = '%s-%s' % (actual_obj, jobId)
-            # TODO 왜 hidden object 의 metadata를 가져오는 거지..???
+
             meta_prefix = 'X-Object-Meta'
             meta = self.swift.get_object_metadata(account, container, object,
                                                   metadata_prefix=meta_prefix)
@@ -231,7 +232,7 @@ class ObjectRestorer(Daemon):
         self.report()
 
     def get_archiveid(self, account, container, object):
-        glacier_account = '.glacier_%s' % account
+        glacier_account = '%s%s' % (self.glacier_account_prefix, account)
 
         for o in self.swift.iter_objects(glacier_account, container):
             hobj = o['name']
@@ -256,9 +257,8 @@ class ObjectRestorer(Daemon):
                                  self.restoring_container, restoring_object)
 
     def complete_restore(self, actual_obj, job):
-        etag = self.compute_obj_md5(actual_obj)
-        tmppath = self.glacier_tmpdir + etag
-
+        tmppath = tempfile.NamedTemporaryFile(bufsize=0, delete=False,
+                                              dir=self.glacier_tmpdir).name
         try:
             job.download_to_file(filename=tmppath)
 
