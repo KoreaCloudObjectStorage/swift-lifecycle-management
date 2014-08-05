@@ -193,8 +193,6 @@ class ObjectExpirer(Daemon):
                 if actual_expire_time == int(hidden_container):
                     self.delete_actual_object(obj)
 
-            self.swift.delete_object(self.s3_expiring_objects_account,
-                                     hidden_container, obj)
             self.report_objects += 1
             self.logger.increment('objects')
         except (Exception, Timeout) as err:
@@ -202,6 +200,10 @@ class ObjectExpirer(Daemon):
             self.logger.exception(
                 _('Exception while deleting object %s %s %s') %
                 (hidden_container, obj, str(err)))
+        finally:
+            self.swift.delete_object(self.s3_expiring_objects_account,
+                                     hidden_container, obj)
+
         self.logger.timing_since('timing', start_time)
         self.report()
 
