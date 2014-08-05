@@ -143,6 +143,8 @@ class ObjectController(WSGIContext):
         return self.GETorHEAD(env, start_response)
 
     def DELETE(self, env, start_response):
+        # TODO Object Delete 시, transition 된 object 일 경우, Glacier 에서도 지워야하고
+        # hidden account(.glacier_[account] 에서도 지워야함
         return self.app
 
     def HEAD(self, env, start_response):
