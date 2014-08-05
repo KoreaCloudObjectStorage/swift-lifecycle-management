@@ -62,7 +62,9 @@ class TruncateMiddleware(object):
         method = req.method
         self.device, self.partition, self.account, self.container, \
             self.obj = split_and_validate_path(req, 5, 5, True)
-        if method == 'PUT' and GLACIER_FLAG_META in req.headers:
+
+        if (method == 'PUT' or method == 'POST') and \
+           GLACIER_FLAG_META in req.headers:
             return self.truncate(env)(env, start_response)
 
         return self.app(env, start_response)

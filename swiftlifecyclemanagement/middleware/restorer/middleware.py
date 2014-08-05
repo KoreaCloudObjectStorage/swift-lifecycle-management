@@ -20,12 +20,11 @@ class RestoreMiddleware(object):
         self.device, self.partition, self.account, self.container, \
             self.obj = split_and_validate_path(req, 5, 5, True)
 
-        if req.method == 'PUT' and 'X-Object-Meta-S3-Restored' in req.headers:
-            return self.save_object(env)(env, start_response)
-
-        if req.method == 'PUT' and 'X-Object-Meta-S3-Restore' in req.headers:
-            return self.set_restoring(env)(env, start_response)
-
+        if (req.method == 'PUT') or (req.method == 'POST'):
+            if 'X-Object-Meta-S3-Restored' in req.headers:
+                return self.save_object(env)(env, start_response)
+            if 'X-Object-Meta-S3-Restore' in req.headers:
+                return self.set_restoring(env)(env, start_response)
         return self.app(env, start_response)
 
     def save_object(self, env):
