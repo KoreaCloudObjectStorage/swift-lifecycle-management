@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from eventlet import Timeout, sleep
 from eventlet.greenpool import GreenPool
 import hashlib
@@ -197,6 +198,8 @@ class ObjectTransitor(Daemon):
                     times = calc_when_actions_do(object_rule, last_modified)
                     actual_expire_time = int(times['Transition'])
                     if actual_expire_time == int(container):
+                        # TODO 만약 Transition에 실패할 경우 다시 시도해야 하므로,
+                        # 예외처리가 필요하다
                         self.request_transition(obj)
 
             self.swift.delete_object(self.s3_transition_objects_account,

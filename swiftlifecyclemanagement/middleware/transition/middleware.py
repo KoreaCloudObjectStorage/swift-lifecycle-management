@@ -4,6 +4,7 @@ from swift.common.http import HTTP_NO_CONTENT
 import time
 import os
 from copy import copy
+import tempfile
 
 from swift.common.bufferedhttp import http_connect
 from swift.common.ring import Ring
@@ -20,7 +21,8 @@ class TransitionMiddleware(object):
         self.logger = get_logger(self.conf, log_route='transition')
         self.container_ring = Ring('/etc/swift', ring_name='container')
         self.glacier_account_prefix = '.glacier_'
-        self.temp_path = conf.get('temp_path', '/home/vagrant/test/')
+        self.temp_path = conf.get('temp_path', '/var/cache/s3/')
+
         self.glacier = self._init_glacier()
 
     def _init_glacier(self):
@@ -37,9 +39,11 @@ class TransitionMiddleware(object):
 
         # Glacier로 업로드
         tmpfile = self.save_to_tempfile(obj_body)
-        archive_id = self.glacier.upload_archive(tmpfile)
-        glacier_obj = '%s-%s' % (self.obj, archive_id)
-        self.delete_tempfile(tmpfile)
+        try:
+            archive_id = self.glacier.upload_archive(tmpfile)
+            glacier_obj = '%s-%s' % (self.obj, archive_id)
+        finally:
+            self.delete_tempfile(tmpfile)
 
         # Object를 0KB로 만들기
         req = Request(copy(env))
@@ -70,13 +74,13 @@ class TransitionMiddleware(object):
         return Response(status=HTTP_NO_CONTENT)
 
     def save_to_tempfile(self, data):
-        etag = md5()
-        etag.update(data)
-        etag = etag.hexdigest()
-        tmp_path = self.temp_path+etag
+        tmp_path = None
         try:
-            with open(tmp_path, 'w') as fp:
-                fp.write(data)
+            with tempfile.NamedTemporaryFile(bufsize=0, delete=False,
+                                             dir=self.temp_path) as temp:
+                temp.write(data)
+                temp.flush()
+                tmp_path = temp.name
         except Exception as e:
             self.logger.error(e)
         return tmp_path
