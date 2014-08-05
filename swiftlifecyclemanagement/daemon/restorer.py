@@ -29,8 +29,9 @@ from eventlet import sleep, Timeout
 from eventlet.greenpool import GreenPool
 
 from swift.common.daemon import Daemon
-from swift.common.internal_client import InternalClient
-from swift.common.utils import get_logger, dump_recon_cache, normalize_timestamp, normalize_delete_at_timestamp
+from swift.common.internal_client import InternalClient, UnexpectedResponse
+from swift.common.utils import get_logger, dump_recon_cache, \
+    normalize_timestamp, normalize_delete_at_timestamp
 
 
 class ObjectRestorer(Daemon):
@@ -207,6 +208,7 @@ class ObjectRestorer(Daemon):
             archiveId = self.get_archiveid(account, container, object)
             jobId = self.glacier.retrieve_archive(archiveId).id
             restoring_obj = '%s-%s' % (actual_obj, jobId)
+            # TODO 왜 hidden object 의 metadata를 가져오는 거지..???
             meta_prefix = 'X-Object-Meta'
             meta = self.swift.get_object_metadata(account, container, object,
                                                   metadata_prefix=meta_prefix)
@@ -240,51 +242,63 @@ class ObjectRestorer(Daemon):
 
     def check_object_restored(self, restoring_object):
         actual_obj, jobId = restoring_object.split('-', 1)
-        job = self.glacier.get_job(job_id=jobId)
-        if not job.completed:
-            return
-        self.complete_restore(actual_obj, job)
+        try:
+            job = self.glacier.get_job(job_id=jobId)
+            if not job.completed:
+                return
+            self.complete_restore(actual_obj, job)
+        except Exception as e:
+            # Job ID가 만료될 경우 다시 restore 를 시도한다.
+            self.start_object_restoring(actual_obj)
+            self.logger.info(e)
+
         self.swift.delete_object(self.restoring_object_account,
                                  self.restoring_container, restoring_object)
 
     def complete_restore(self, actual_obj, job):
         etag = self.compute_obj_md5(actual_obj)
-
         tmppath = self.glacier_tmpdir + etag
-        job.download_to_file(filename=tmppath)
 
-        # open file
-        obj_body = open(tmppath, 'r')
+        try:
+            job.download_to_file(filename=tmppath)
 
-        meta_prefix = 'X-Object-Meta'
-        a, c, o = actual_obj.split('/', 2)
-        metadata = self.swift.get_object_metadata(a, c, o,
-                                                  metadata_prefix=meta_prefix)
-        metadata = {'X-Object-Meta'+key: value for key, value in metadata
-                    .iteritems()}
-        days = int(metadata['X-Object-Meta-s3-restore-expire-days'])
-        expire_time = normalize_delete_at_timestamp(calc_nextDay(time()) +
-                                                    (days-1) * 86400)
+            prefix = 'X-Object-Meta'
+            a, c, o = actual_obj.split('/', 2)
+            metadata = self.swift.get_object_metadata(a, c, o,
+                                                      metadata_prefix=prefix)
+            metadata = {'X-Object-Meta'+key: value for key, value in metadata
+                        .iteritems()}
+            days = int(metadata['X-Object-Meta-s3-restore-expire-days'])
+            exp_time = normalize_delete_at_timestamp(calc_nextDay(time()) +
+                                                     (days-1) * 86400)
 
-        # send restored object to proxy server
-        path = '/v1/%s' % actual_obj
-        metadata['X-Object-Meta-S3-Restored'] = True
-        expire_date = strftime("%a, %d %b %Y %H:%M:%S GMT",
-                               gmtime(float(expire_time)))
+            # send restored object to proxy server
+            path = '/v1/%s' % actual_obj
+            metadata['X-Object-Meta-S3-Restored'] = True
+            exp_date = strftime("%a, %d %b %Y %H:%M:%S GMT",
+                                gmtime(float(exp_time)))
 
-        metadata['X-Object-Meta-s3-restore'] = 'ongoing-request="false" ' \
-                                               'expiry-date=%s' % expire_date
-        metadata['Content-Length'] = os.path.getsize(tmppath)
-        del metadata['X-Object-Meta-s3-restore-expire-days']
-        self.swift.make_request('PUT', path, metadata, (2,),
-                                body_file=obj_body)
+            metadata['X-Object-Meta-s3-restore'] = 'ongoing-request="false" ' \
+                                                   'expiry-date=%s' % exp_date
+            metadata['Content-Length'] = os.path.getsize(tmppath)
+            del metadata['X-Object-Meta-s3-restore-expire-days']
 
-        # Add to .s3_expiring_restored_objects
-        self.update_action_hidden(self.expiring_restored_account, expire_time,
+            obj_body = open(tmppath, 'r')
+            self.swift.make_request('PUT', path, metadata, (2,),
+                                    body_file=obj_body)
+
+            # Add to .s3_expiring_restored_objects
+            self.update_action_hidden(self.expiring_restored_account,
+                                      exp_time, actual_obj)
+            obj_body.close()
+        except UnexpectedResponse as e:
+            if e.resp.status_int == 404:
+                self.logger.error('Restoring object not found - %s' %
                                   actual_obj)
-        # DELETE tmp file
-        obj_body.close()
-        os.remove(tmppath)
+        except Exception as e:
+            self.logger.debug(e)
+        finally:
+            os.remove(tmppath)
 
     def compute_obj_md5(self, obj):
         etag = hashlib.md5()
