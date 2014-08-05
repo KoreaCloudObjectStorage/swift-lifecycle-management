@@ -1,19 +1,21 @@
 # -*- coding: utf-8 -*-
-from eventlet import Timeout, sleep
-from eventlet.greenpool import GreenPool
 import hashlib
+import urllib
+from time import time
 from os.path import join
 from random import random
+
+from eventlet import Timeout, sleep
+from eventlet.greenpool import GreenPool
 
 from swift import gettext_ as _
 from swift.common.daemon import Daemon
 from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT, is_success
 from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
-from time import time
-import urllib
-from swiftlifecyclemanagement.common.lifecycle import Lifecycle, LIFECYCLE_OK, \
-    GLACIER_FLAG_META, calc_when_actions_do
+
+from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
+    LIFECYCLE_OK, GLACIER_FLAG_META, calc_when_actions_do
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
 
 
@@ -23,15 +25,14 @@ class ObjectTransitor(Daemon):
         self.conf = conf
         self.logger = get_logger(conf, log_route='s3-object-transitor')
         self.interval = int(conf.get('interval') or 300)
-        self.s3_transition_objects_account = \
+        self.s3_tr_objects_account = \
             (conf.get('auto_create_account_prefix') or '.') + \
             (conf.get('expiring_objects_account_name') or
              's3_transitioning_objects')
         conf_path = conf.get('__file__') or \
             '/etc/swift/s3-object-transitor.conf'
         request_tries = int(conf.get('request_tries') or 3)
-        self.swift = InternalClient(conf_path,
-                                    'Swift Object Transitor',
+        self.swift = InternalClient(conf_path, 'Swift Object Transitor',
                                     request_tries)
         self.report_interval = int(conf.get('report_interval') or 300)
         self.report_first_time = self.report_last_time = time()
@@ -86,20 +87,18 @@ class ObjectTransitor(Daemon):
         try:
             self.logger.debug(_('Run begin'))
             containers, objects = \
-                self.swift.get_account_info(self.s3_transition_objects_account)
+                self.swift.get_account_info(self.s3_tr_objects_account)
             self.logger.info(_('Pass beginning; %s possible containers; %s '
                                'possible objects') % (containers, objects))
 
-            for c in self.swift.iter_containers(self.
-                                                s3_transition_objects_account):
+            for c in self.swift.iter_containers(self.s3_tr_objects_account):
                 container = c['name']
                 timestamp = int(container)
                 if timestamp > int(time()):
                     break
                 containers_to_delete.append(container)
-                for o in self.swift.iter_objects(self
-                                                 .s3_transition_objects_account
-                                                 , container):
+                for o in self.swift.iter_objects(self.s3_tr_objects_account,
+                                                 container):
                     obj = o['name'].encode('utf8')
                     if processes > 0:
                         obj_process = int(
@@ -112,10 +111,8 @@ class ObjectTransitor(Daemon):
             pool.waitall()
             for container in containers_to_delete:
                 try:
-                    self.swift.delete_container(
-                        self.s3_transition_objects_account,
-                        container,
-                        acceptable_statuses=(2, HTTP_NOT_FOUND, HTTP_CONFLICT))
+                    self.swift.delete_container(self.s3_tr_objects_account,
+                                                container, (2, 4))
                 except (Exception, Timeout) as err:
                     self.logger.exception(
                         _('Exception while deleting container %s %s') %
@@ -202,7 +199,7 @@ class ObjectTransitor(Daemon):
                         # 예외처리가 필요하다
                         self.request_transition(obj)
 
-            self.swift.delete_object(self.s3_transition_objects_account,
+            self.swift.delete_object(self.s3_tr_objects_account,
                                      container, obj)
             self.report_objects += 1
             self.logger.increment('objects')

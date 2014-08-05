@@ -13,26 +13,26 @@
 # implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from boto.glacier.layer2 import Layer2
 import os
 import tempfile
-
+import hashlib
 from random import random
-from swift.common.bufferedhttp import http_connect
-from swift.common.ring import Ring
-from swiftlifecyclemanagement.common.lifecycle import calc_nextDay
 from time import time, strftime, gmtime
 from os.path import join
-from swift import gettext_ as _
-import hashlib
 
+from boto.glacier.layer2 import Layer2
 from eventlet import sleep, Timeout
 from eventlet.greenpool import GreenPool
 
+from swift import gettext_ as _
+from swift.common.bufferedhttp import http_connect
+from swift.common.ring import Ring
 from swift.common.daemon import Daemon
 from swift.common.internal_client import InternalClient, UnexpectedResponse
 from swift.common.utils import get_logger, dump_recon_cache, \
     normalize_timestamp, normalize_delete_at_timestamp
+
+from swiftlifecyclemanagement.common.lifecycle import calc_nextDay
 
 
 class ObjectRestorer(Daemon):
@@ -200,20 +200,20 @@ class ObjectRestorer(Daemon):
 
         return processes, process
 
-    def start_object_restoring(self,  obj):
+    def start_object_restoring(self, obj):
         start_time = time()
         try:
             # OBJECT 형태 a/c/o-archiveid
             actual_obj = obj
-            account, container, object = actual_obj.split('/', 2)
-            archiveId = self.get_archiveid(account, container, object)
+            account, container, obj = actual_obj.split('/', 2)
+            archiveId = self.get_archiveid(account, container, obj)
             jobId = self.glacier.retrieve_archive(archiveId).id
             restoring_obj = '%s-%s' % (actual_obj, jobId)
 
             meta_prefix = 'X-Object-Meta'
-            meta = self.swift.get_object_metadata(account, container, object,
+            meta = self.swift.get_object_metadata(account, container, obj,
                                                   metadata_prefix=meta_prefix)
-            meta = {'X-Object-Meta'+key: value for key, value in
+            meta = {'X-Object-Meta' + key: value for key, value in
                     meta.iteritems()}
             self.update_action_hidden(self.restoring_object_account,
                                       self.restoring_container,
@@ -231,13 +231,14 @@ class ObjectRestorer(Daemon):
         self.logger.timing_since('timing', start_time)
         self.report()
 
-    def get_archiveid(self, account, container, object):
+    def get_archiveid(self, account, container, obj):
         glacier_account = '%s%s' % (self.glacier_account_prefix, account)
 
+        hobj = None
         for o in self.swift.iter_objects(glacier_account, container):
             hobj = o['name']
             aobj = hobj.split('-', 2)[0]
-            if aobj == object:
+            if aobj == obj:
                 break
         return hobj.split('-', 1)[1]
 
@@ -266,11 +267,11 @@ class ObjectRestorer(Daemon):
             a, c, o = actual_obj.split('/', 2)
             metadata = self.swift.get_object_metadata(a, c, o,
                                                       metadata_prefix=prefix)
-            metadata = {'X-Object-Meta'+key: value for key, value in metadata
-                        .iteritems()}
+            metadata = {'X-Object-Meta' + key: value for key, value in metadata
+            .iteritems()}
             days = int(metadata['X-Object-Meta-s3-restore-expire-days'])
             exp_time = normalize_delete_at_timestamp(calc_nextDay(time()) +
-                                                     (days-1) * 86400)
+                                                     (days - 1) * 86400)
 
             # send restored object to proxy server
             path = '/v1/%s' % actual_obj
@@ -306,8 +307,8 @@ class ObjectRestorer(Daemon):
         etag = etag.hexdigest()
         return etag
 
-    def update_action_hidden(self, account, container, object, metadata=None):
-        hidden_path = '/%s/%s/%s' % (account, container, object)
+    def update_action_hidden(self, account, container, obj, metadata=None):
+        hidden_path = '/%s/%s/%s' % (account, container, obj)
         part, nodes = self.container_ring.get_nodes(account, container)
         for node in nodes:
             ip = node['ip']

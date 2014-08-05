@@ -1,30 +1,29 @@
 # -*- coding: utf-8 -*-
-import ast
-import json
-from swift.common.http import is_success
-from time import time
-
-from random import random
-from swift.common.bufferedhttp import http_connect
-from swift.common.ring import Ring
-from os.path import join
-from swift import gettext_ as _
 import hashlib
+import json
+from time import time
+from random import random
+from os.path import join
 
 from eventlet import sleep, Timeout
 from eventlet.greenpool import GreenPool
 
+from swift import gettext_ as _
 from swift.common.daemon import Daemon
 from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache, \
     normalize_timestamp
+from swift.common.bufferedhttp import http_connect
+from swift.common.ring import Ring
+from swift.common.http import is_success
 
 from swiftlifecyclemanagement.common.lifecycle import \
     CONTAINER_LIFECYCLE_SYSMETA, Lifecycle, \
     OBJECT_LIFECYCLE_NOT_EXIST, LIFECYCLE_OK, LIFECYCLE_ERROR, \
     CONTAINER_LIFECYCLE_IS_UPDATED, calc_when_actions_do, ContainerLifecycle
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
-from swiftlifecyclemanagement.middleware.lifecycle.utils import make_object_metadata_from_rule
+from swiftlifecyclemanagement.middleware.lifecycle.utils import \
+    make_object_metadata_from_rule
 
 
 class LifecyclePropagator(Daemon):
@@ -254,10 +253,9 @@ class LifecyclePropagator(Daemon):
 
     def iter_objects_by_prefix(self, account, container, prefix):
         path = self.swift.make_path(account, container)
-        resp = self.swift.make_request(
-            'GET', '%s?format=json&prefix=%s' %
-            (path, prefix),
-            {}, (2, 4))
+        param = 'format=json&prefix=%s' % prefix
+        resp = self.swift.make_request('GET', '%s?%s' % (path, param), {},
+                                       (2, 4))
         if not resp.status_int == 200:
             return
         data = json.loads(resp.body)

@@ -5,6 +5,7 @@ import urlparse
 from urllib2 import unquote
 from operator import itemgetter
 from copy import copy
+
 from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path, \
     normalize_timestamp
@@ -18,11 +19,14 @@ from swift.common.request_helpers import is_user_meta
 from exceptions import LifecycleConfigException
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
 from utils import xml_to_list, lifecycle_to_xml, get_status_int, \
-    updateLifecycleMetadata, check_lifecycle_validation, make_object_metadata_from_rule
-from swiftlifecyclemanagement.common.lifecycle import Lifecycle,\
+    updateLifecycleMetadata, check_lifecycle_validation, \
+    make_object_metadata_from_rule
+from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
     CONTAINER_LIFECYCLE_NOT_EXIST, \
     LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
-    CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do, LIFECYCLE_NOT_EXIST, ContainerLifecycle
+    CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, \
+    CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do, LIFECYCLE_NOT_EXIST,\
+    ContainerLifecycle
 
 
 def get_err_response(err):
@@ -43,7 +47,6 @@ def get_err_response(err):
 
 
 class ObjectController(WSGIContext):
-
     def __init__(self, app, account, container_name, object_name, **kwargs):
         WSGIContext.__init__(self, app)
         self.account = account
@@ -96,7 +99,8 @@ class ObjectController(WSGIContext):
         elif obj_lc_status in (OBJECT_LIFECYCLE_NOT_EXIST,
                                CONTAINER_LIFECYCLE_IS_UPDATED):
             # Make new object metadata
-            object_rule = lifecycle.container.get_rule_by_object_name(self.object)
+            object_rule = lifecycle.container.get_rule_by_object_name(
+                self.object)
             new_header = make_object_metadata_from_rule(object_rule)
             actionList = calc_when_actions_do(object_rule, last_modified)
 

@@ -1,22 +1,23 @@
 import urllib
+import hashlib
 from random import random
 from time import time
 from os.path import join
-from swift import gettext_ as _
-import hashlib
 from eventlet import sleep, Timeout
 from eventlet.greenpool import GreenPool
+
+from swift import gettext_ as _
 from swift.common.daemon import Daemon
 from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
 from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT
 
-from swiftlifecyclemanagement.common.lifecycle import Lifecycle, LIFECYCLE_OK, calc_when_actions_do
+from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
+    LIFECYCLE_OK, calc_when_actions_do
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
 
 
 class ObjectExpirer(Daemon):
-
     def __init__(self, conf):
         super(ObjectExpirer, self).__init__(conf)
         self.conf = conf

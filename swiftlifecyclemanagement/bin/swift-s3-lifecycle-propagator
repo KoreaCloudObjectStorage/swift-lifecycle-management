@@ -3,7 +3,7 @@
 from swift.common.daemon import run_daemon
 from swift.common.utils import parse_options
 from optparse import OptionParser
-from swiftlifecyclemanagement.daemon.lifecycle_propagator import\
+from swiftlifecyclemanagement.daemon.lifecycle_propagator import \
     LifecyclePropagator
 
 if __name__ == '__main__':

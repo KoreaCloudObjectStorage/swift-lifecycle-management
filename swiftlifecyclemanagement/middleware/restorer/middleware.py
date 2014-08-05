@@ -1,9 +1,12 @@
 # coding=utf-8
-from swift.common.exceptions import DiskFileDeviceUnavailable, ChunkReadTimeout, DiskFileNoSpace
-from swift.common.request_helpers import split_and_validate_path, is_user_meta
-from swift.common.swob import Request, HTTPInsufficientStorage, HTTPRequestTimeout, HTTPCreated
-from swift.common.utils import get_logger
 from hashlib import md5
+
+from swift.common.exceptions import DiskFileDeviceUnavailable, \
+    ChunkReadTimeout, DiskFileNoSpace
+from swift.common.request_helpers import split_and_validate_path, is_user_meta
+from swift.common.swob import Request, HTTPInsufficientStorage,\
+    HTTPRequestTimeout, HTTPCreated
+from swift.common.utils import get_logger
 from swift.obj.diskfile import DiskFileManager
 
 
@@ -50,8 +53,9 @@ class RestoreMiddleware(object):
         try:
             with disk_file.create(size=fsize) as writer:
                 def timeout_reader():
-                        with ChunkReadTimeout(60):
-                            return req.environ['wsgi.input'].read(65536)
+                    with ChunkReadTimeout(60):
+                        return req.environ['wsgi.input'].read(65536)
+
                 try:
                     for chunk in iter(lambda: timeout_reader(), ''):
                         etag.update(chunk)
@@ -93,6 +97,7 @@ class RestoreMiddleware(object):
                      **kwargs):
         return self._diskfile_mgr.get_diskfile(device, partition, account,
                                                container, obj, **kwargs)
+
 
 def filter_factory(global_conf, **local_conf):
     """Standard filter factory to use the middleware with paste.deploy"""

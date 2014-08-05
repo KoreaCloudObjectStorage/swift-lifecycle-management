@@ -1,16 +1,17 @@
 # coding=utf-8
-from boto.glacier.layer2 import Layer2
-from swift.common.http import HTTP_NO_CONTENT
+import tempfile
 import time
 import os
 from copy import copy
-import tempfile
 
+from boto.glacier.layer2 import Layer2
+
+from swift.common.http import HTTP_NO_CONTENT
 from swift.common.bufferedhttp import http_connect
 from swift.common.ring import Ring
 from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path, normalize_timestamp
-from hashlib import md5
+
 from swiftlifecyclemanagement.common.lifecycle import GLACIER_FLAG_META
 
 

@@ -14,15 +14,15 @@
 # limitations under the License.
 
 import urllib
+import hashlib
 from random import random
 from time import time
 from os.path import join
-from swift import gettext_ as _
-import hashlib
 
 from eventlet import sleep, Timeout
 from eventlet.greenpool import GreenPool
 
+from swift import gettext_ as _
 from swift.common.daemon import Daemon
 from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
@@ -42,7 +42,7 @@ class RestoredObjectExpirer(Daemon):
         self.conf = conf
         self.logger = get_logger(conf, log_route='restored-object-expirer')
         self.interval = int(conf.get('interval') or 300)
-        self.expiring_restored_object_account = '.s3_expiring_restored_objects'
+        self.expire_restored_account = '.s3_expiring_restored_objects'
         conf_path = '/etc/swift/s3-restored-object-expirer.conf'
         request_tries = int(conf.get('request_tries') or 3)
         self.swift = InternalClient(conf_path,
@@ -100,16 +100,17 @@ class RestoredObjectExpirer(Daemon):
         try:
             self.logger.debug(_('Run begin'))
             containers, objects = \
-                self.swift.get_account_info(self.expiring_restored_object_account)
+                self.swift.get_account_info(
+                    self.expire_restored_account)
             self.logger.info(_('Pass beginning; %s possible containers; %s '
                                'possible objects') % (containers, objects))
-            for c in self.swift.iter_containers(self.expiring_restored_object_account):
+            for c in self.swift.iter_containers(self.expire_restored_account):
                 container = c['name']
                 timestamp = int(container)
                 if timestamp > int(time()):
                     break
                 containers_to_delete.append(container)
-                for o in self.swift.iter_objects(self.expiring_restored_object_account,
+                for o in self.swift.iter_objects(self.expire_restored_account,
                                                  container):
                     obj = o['name'].encode('utf8')
                     if processes > 0:
@@ -119,15 +120,12 @@ class RestoredObjectExpirer(Daemon):
                         if obj_process % processes != process:
                             continue
 
-                    pool.spawn_n(
-                        self.delete_object, container, obj)
+                    pool.spawn_n(self.delete_object, container, obj)
             pool.waitall()
             for container in containers_to_delete:
                 try:
-                    self.swift.delete_container(
-                        self.expiring_restored_object_account,
-                        container,
-                        acceptable_statuses=(2, HTTP_NOT_FOUND, HTTP_CONFLICT))
+                    self.swift.delete_container(self.expire_restored_account,
+                                                container, (2, 4))
                 except (Exception, Timeout) as err:
                     self.logger.exception(
                         _('Exception while deleting container %s %s') %
@@ -195,7 +193,7 @@ class RestoredObjectExpirer(Daemon):
         start_time = time()
         try:
             self.delete_actual_object(obj)
-            self.swift.delete_object(self.expiring_restored_object_account,
+            self.swift.delete_object(self.expire_restored_account,
                                      container, obj)
             self.report_objects += 1
             self.logger.increment('objects')
@@ -222,8 +220,8 @@ class RestoredObjectExpirer(Daemon):
         account, container, object = actual_obj.split('/', 2)
         metadata = self.swift.get_object_metadata(account, container, object,
                                                   'X-Object-Meta')
-        metadata = {'X-Object-Meta'+key: value for key, value in metadata
-                    .iteritems()}
+        metadata = {'X-Object-Meta' + key: value for key, value in metadata
+        .iteritems()}
         del metadata['X-Object-Meta-s3-restore']
         self.swift.make_request('POST', path, metadata,
                                 (2, HTTP_NOT_FOUND, HTTP_PRECONDITION_FAILED))

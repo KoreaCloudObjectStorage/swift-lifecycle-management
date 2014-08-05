@@ -1,10 +1,12 @@
 # coding=utf-8
 from copy import copy
+
 from swift.common.exceptions import DiskFileDeviceUnavailable
 from swift.common.swob import Request, HTTPInsufficientStorage, HTTPCreated
 from swift.common.utils import get_logger
 from swift.common.request_helpers import split_and_validate_path, is_user_meta
 from swift.obj.diskfile import DiskFileManager
+
 from swiftlifecyclemanagement.common.lifecycle import GLACIER_FLAG_META
 
 
@@ -24,6 +26,7 @@ class TruncateMiddleware(object):
         except DiskFileDeviceUnavailable:
             return HTTPInsufficientStorage(drive=self.device,
                                            request=Request(copy(env)))
+        
         # object flow 상, 임시 데이터를 삭제 후 DiskFileWrite 의 put을 하게 되면,
         # _finalize_put을 호출하게 된다. 이 때, metadata에 설정된 X-Timestamp 값으로
         # object 파일명을 생성하고, 임시 파일로 대체한다.
@@ -53,7 +56,7 @@ class TruncateMiddleware(object):
         return HTTPCreated(request=req, etag=ori_meta['ETag'])
 
     def get_diskfile(self, device, partition, account, container, obj,
-                    **kwargs):
+                     **kwargs):
         return self._diskfile_mgr.get_diskfile(device, partition, account,
                                                container, obj, **kwargs)
 

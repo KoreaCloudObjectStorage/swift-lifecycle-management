@@ -1,8 +1,7 @@
 # coding=utf-8
-from copy import copy
-
 import xml.etree.ElementTree as ET
 import time
+from copy import copy
 
 from swiftlifecyclemanagement.common.lifecycle import \
     CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META
@@ -53,8 +52,8 @@ def xml_to_list(xml):
                 exceptionMsg['code'] = 'InvalidRequest'
                 exceptionMsg['msg'] = 'Found mixed \'Date\' and \'Days\' ' \
                                       'based Expiration and ' \
-                                      'Transition actions'\
-                                      'in lifecycle rule for prefix \'%s\''\
+                                      'Transition actions' \
+                                      'in lifecycle rule for prefix \'%s\'' \
                                       % prefix
                 raise LifecycleConfigException(exceptionMsg)
 
@@ -187,7 +186,7 @@ def check_lifecycle_validation(rulelist):
                 exceptionMsg['code'] = 'InvalidRequest'
                 exceptionMsg['msg'] = 'Found overlapping prefixes' \
                                       ' \'%s\' and \'%s\' ' \
-                                      'for same action type \'%s\''\
+                                      'for same action type \'%s\'' \
                                       % (basePrefix, comparePrefix, key)
                 raise LifecycleConfigException(exceptionMsg)
 
@@ -201,8 +200,8 @@ def check_lifecycle_validation(rulelist):
             exceptionMsg['status'] = 400
             exceptionMsg['code'] = 'InvalidRequest'
             exceptionMsg['msg'] = 'Found mixed \'Date\' and \'Days\' ' \
-                                  'based Expiration and Transition actions'\
-                                  'in lifecycle rule for prefixs \'%s\''\
+                                  'based Expiration and Transition actions' \
+                                  'in lifecycle rule for prefixs \'%s\'' \
                                   'and \'%s\'' % (basePrefix, comparePrefix)
             raise LifecycleConfigException(exceptionMsg)
 
@@ -212,7 +211,7 @@ def _iter_list_to_compare(sortedlist):
 
     for i in range(length - 1):
         base = sortedlist[i]
-        for j in range(i+1, length):
+        for j in range(i + 1, length):
             comp = sortedlist[j]
             if not comp['Prefix'].startswith(base['Prefix']):
                 break
