@@ -20,9 +20,6 @@ class RestoreMiddleware(object):
     def __call__(self, env, start_response):
         req = Request(env)
 
-        self.device, self.partition, self.account, self.container, \
-            self.obj = split_and_validate_path(req, 5, 5, True)
-
         if (req.method == 'PUT') or (req.method == 'POST'):
             if 'X-Object-Meta-S3-Restored' in req.headers:
                 return self.save_object(env)(env, start_response)
@@ -30,9 +27,14 @@ class RestoreMiddleware(object):
                 return self.set_restoring(env)(env, start_response)
         return self.app(env, start_response)
 
+    def _split_request_path(self, req):
+        self.device, self.partition, self.account, self.container, \
+            self.obj = split_and_validate_path(req, 5, 5, True)
+
     def save_object(self, env):
         # Restorer 데몬에 의해 호출됨
         req = Request(env)
+        self._split_request_path(req)
         try:
             disk_file = self.get_diskfile(self.device, self.partition,
                                           self.account, self.container,
@@ -76,6 +78,7 @@ class RestoreMiddleware(object):
     def set_restoring(self, env):
         # Lifecycle Middleware 에서 restore 중이라고 object 를 설정할 때 호출됨
         req = Request(env)
+        self._split_request_path(req)
         try:
             disk_file = self.get_diskfile(self.device, self.partition,
                                           self.account, self.container,

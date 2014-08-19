@@ -63,11 +63,11 @@ class TruncateMiddleware(object):
     def __call__(self, env, start_response):
         req = Request(copy(env))
         method = req.method
-        self.device, self.partition, self.account, self.container, \
-            self.obj = split_and_validate_path(req, 5, 5, True)
 
         if (method == 'PUT' or method == 'POST') and \
            GLACIER_FLAG_META in req.headers:
+            self.device, self.partition, self.account, self.container, \
+                self.obj = split_and_validate_path(req, 5, 5, True)
             return self.truncate(env)(env, start_response)
 
         return self.app(env, start_response)
