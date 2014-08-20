@@ -50,6 +50,7 @@ class LifecycleCommon(object):
             req = Request(self.env)
             req.method = 'HEAD'
             req.path_info = self.path
+            req.headers['Content-Length'] = '0'
             resp = req.get_response(self.app)
 
         if resp is None:
