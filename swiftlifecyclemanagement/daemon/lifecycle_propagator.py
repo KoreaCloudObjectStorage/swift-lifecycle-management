@@ -233,6 +233,9 @@ class LifecyclePropagator(Daemon):
         result = list()
         to_append = False
         for rule in lifecycle:
+            if rule['Status'].lower() == 'disabled':
+                continue
+
             for key in ('Expiration', 'Transition'):
                 if key not in rule:
                     continue
