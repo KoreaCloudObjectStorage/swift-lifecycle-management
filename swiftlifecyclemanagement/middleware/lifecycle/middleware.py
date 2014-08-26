@@ -419,6 +419,13 @@ class LifecycleManageController(WSGIContext):
             self.update_hidden_s3_account(self.account, self.container)
         except LifecycleConfigException as e:
             return get_err_response(e.message)
+        except Exception:
+            msg = dict()
+            msg['status'] = 400
+            msg['code'] = 'MalformedXML'
+            msg['msg'] = 'The XML you provided was not well-formed or did ' \
+                         'not validate against our published schema'
+            return get_err_response(msg)
         return Response(status=200, app_iter='True',
                         headers={LIFECYCLE_RESPONSE_HEADER: True})
 
