@@ -16,12 +16,12 @@ def xml_to_list(xml):
     for rule in rules:
         ruledata = dict()
 
-        if rule.find('Prefix'):
+        if rule.find('Prefix') is not None and rule.find('Prefix').text:
             prefix = rule.find("Prefix").text
         else:
             prefix = ''
 
-        if rule.find('ID'):
+        if rule.find('ID') is not None and rule.find('ID').text:
             id = rule.find("ID").text
         else:
             id = 'Rule for '
