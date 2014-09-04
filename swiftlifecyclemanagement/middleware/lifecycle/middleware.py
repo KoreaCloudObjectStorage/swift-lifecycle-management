@@ -70,9 +70,12 @@ class ObjectController(WSGIContext):
         last_modified = gmt_to_timestamp(headers['Last-Modified'])
 
         is_glacier = False
-        if object_s3_storage_class == 'GLACIER' and \
-           'X-Object-Meta-S3-Restore' not in headers:
+        if object_s3_storage_class == 'GLACIER':
             is_glacier = True
+
+        restoring = headers.get('X-Object-Meta-S3-Restore')
+        if restoring != 'ongoing-request="true"':
+            is_glacier = False
 
         # Glacier로 Transition 된 Object 일 경우
         if is_glacier and env['REQUEST_METHOD'] == 'GET':
