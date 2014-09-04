@@ -2,9 +2,11 @@
 import time
 import xml.etree.ElementTree as ET
 import urlparse
+from base64 import encodestring as encodebytes
 from urllib2 import unquote
 from operator import itemgetter
 from copy import copy
+from hashlib import md5
 
 from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path, \
@@ -376,8 +378,25 @@ class LifecycleManageController(WSGIContext):
     def PUT(self, env, start_response):
         try:
             req = Request(copy(env))
+
+            if 'Content-MD5' not in req.headers:
+                exceptMsg = dict()
+                exceptMsg['status'] = 400
+                exceptMsg['code'] = 'InvalidRequest'
+                exceptMsg['msg'] = 'Missing required header for this ' \
+                                   'request: Content-MD5'
+                raise LifecycleConfigException(exceptMsg)
+
             lifecycle_xml = req.body
             lifecycle = xml_to_list(lifecycle_xml)
+
+            xml_base64 = self.compute_xml_hash(lifecycle_xml)
+            if xml_base64 != req.headers['Content-MD5']:
+                exceptMsg = dict()
+                exceptMsg['status'] = 400
+                exceptMsg['code'] = 'InvalidRequest'
+                exceptMsg['msg'] = 'Content-MD5 does not correct'
+                raise LifecycleConfigException(exceptMsg)
 
             container_lc = ContainerLifecycle(self.account, self.container,
                                               env=env, app=self.app)
@@ -421,6 +440,14 @@ class LifecycleManageController(WSGIContext):
             return get_err_response(e.message)
         return Response(status=200, app_iter='True',
                         headers={LIFECYCLE_RESPONSE_HEADER: True})
+
+    def compute_xml_hash(self, xml):
+        xml_md5 = md5()
+        xml_md5.update(xml)
+        xml_base64 = encodebytes(xml_md5.digest()).encode('utf-8')
+        if xml_base64[-1] == '\n':
+            xml_base64 = xml_base64[0:-1]
+        return xml_base64
 
     def update_hidden_s3_account(self, account, container):
         path = '/%s/%s/%s' % (self.s3_accounts, account, container)
