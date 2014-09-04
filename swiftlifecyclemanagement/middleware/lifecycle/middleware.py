@@ -22,7 +22,7 @@ from utils import xml_to_list, lifecycle_to_xml, get_status_int, \
     updateLifecycleMetadata, check_lifecycle_validation, \
     make_object_metadata_from_rule
 from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
-    CONTAINER_LIFECYCLE_NOT_EXIST, \
+    CONTAINER_LIFECYCLE_NOT_EXIST, CONTAINER_RULE_DISABLED, \
     LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
     CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, \
     CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do, LIFECYCLE_NOT_EXIST,\
@@ -130,7 +130,8 @@ class ObjectController(WSGIContext):
         resp = req.get_response(self.app)
 
         if obj_lc_status in (LIFECYCLE_NOT_EXIST,
-                             CONTAINER_LIFECYCLE_NOT_EXIST):
+                             CONTAINER_LIFECYCLE_NOT_EXIST,
+                             CONTAINER_RULE_DISABLED):
             return resp
 
         lifecycle.reload()
@@ -175,15 +176,13 @@ class ObjectController(WSGIContext):
         if not lifecycle:
             return self.app
 
-        actionList = dict()
-        headers = dict()
+        rule = container_lc.get_rule_by_object_name(self.object)
 
-        for rule in lifecycle:
-            prefix = rule['Prefix']
-            if self.object.startswith(prefix):
-                headers = make_object_metadata_from_rule(rule)
-                actionList = calc_when_actions_do(rule, time.time())
-                break
+        if rule['Status'].lower() == 'disabled':
+            return self.app
+
+        headers = make_object_metadata_from_rule(rule)
+        actionList = calc_when_actions_do(rule, time.time())
 
         if actionList:
             for action, at_time in actionList.iteritems():

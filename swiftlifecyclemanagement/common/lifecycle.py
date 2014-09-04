@@ -16,6 +16,7 @@ LIFECYCLE_NOT_EXIST = 2
 CONTAINER_LIFECYCLE_IS_UPDATED = 3
 CONTAINER_LIFECYCLE_NOT_EXIST = 4
 OBJECT_LIFECYCLE_NOT_EXIST = 5
+CONTAINER_RULE_DISABLED = 6
 
 CONTAINER_LIFECYCLE_SYSMETA = 'X-Container-Sysmeta-S3-Lifecycle-Configuration'
 GLACIER_FLAG_META = 'X-Object-Meta-Glacier'
@@ -75,6 +76,9 @@ class ContainerLifecycle(LifecycleCommon):
 
         if not rule:
             return None
+
+        if rule['Status'].lower() == 'disabled':
+            return CONTAINER_RULE_DISABLED
 
         rule_info = dict()
         rule_info['ID'] = rule['ID']
@@ -187,6 +191,9 @@ class Lifecycle(object):
         obj_name = self.object.obj_name
         c_rule = self.container.get_rule_actions_by_object_name(obj_name)
         o_rule = self.object.get_rules_actions()
+
+        if c_rule == CONTAINER_RULE_DISABLED:
+            return CONTAINER_RULE_DISABLED
 
         if c_rule:
             if o_rule:
