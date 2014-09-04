@@ -145,10 +145,7 @@ def check_lifecycle_validation(rulelist):
 
     # TODO 1000개가 넘을 경우 정확히 어떤 메세지가 오는지 확인해야함.
     if length > 1000:
-        exceptionMsg = dict()
-        exceptionMsg['code'] = "OverUploadedRules"
-        exceptionMsg['msg'] = "1000"
-        raise LifecycleConfigException(exceptionMsg)
+        raise Exception
 
     for base, comp in _iter_list_to_compare(sortedList):
         basePrefix = base['Prefix']
