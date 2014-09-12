@@ -33,6 +33,9 @@ from swift.common.utils import get_logger, dump_recon_cache, \
     normalize_timestamp, normalize_delete_at_timestamp
 
 from swiftlifecyclemanagement.common.lifecycle import calc_nextDay
+from swiftlifecyclemanagement.common.utils import \
+    get_glacier_key_from_hidden_object, \
+    get_glacier_objname_from_hidden_object, make_glacier_hidden_object_name
 
 
 class ObjectRestorer(Daemon):
@@ -203,12 +206,12 @@ class ObjectRestorer(Daemon):
     def start_object_restoring(self, obj):
         start_time = time()
         try:
-            # OBJECT 형태 a/c/o-archiveid
+            # OBJECT 형태 len(archiveid)-archiveid-a/c/o
             actual_obj = obj
             account, container, obj = actual_obj.split('/', 2)
             archiveId = self.get_archiveid(account, container, obj)
             jobId = self.glacier.retrieve_archive(archiveId).id
-            restoring_obj = '%s-%s' % (actual_obj, jobId)
+            restoring_obj = make_glacier_hidden_object_name(actual_obj, jobId)
 
             meta_prefix = 'X-Object-Meta'
             meta = self.swift.get_object_metadata(account, container, obj,
@@ -237,13 +240,15 @@ class ObjectRestorer(Daemon):
         hobj = None
         for o in self.swift.iter_objects(glacier_account, container):
             hobj = o['name']
-            aobj = hobj.split('-', 2)[0]
+            aobj = get_glacier_objname_from_hidden_object(hobj)
+
             if aobj == obj:
                 break
-        return hobj.split('-', 1)[1]
+        return get_glacier_key_from_hidden_object(hobj)
 
     def check_object_restored(self, restoring_object):
-        actual_obj, jobId = restoring_object.split('-', 1)
+        actual_obj = get_glacier_objname_from_hidden_object(restoring_object)
+        jobId = get_glacier_key_from_hidden_object(restoring_object)
         try:
             job = self.glacier.get_job(job_id=jobId)
             if not job.completed:
