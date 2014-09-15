@@ -250,13 +250,19 @@ class ObjectRestorer(Daemon):
         actual_obj = get_glacier_objname_from_hidden_object(restoring_object)
         jobId = get_glacier_key_from_hidden_object(restoring_object)
         try:
+            path = '/v1/%s' % actual_obj
+            resp = self.swift.make_request('GET', path, {}, (2, 4,))
+            if resp.status_int == 404:
+                raise Exception('Object Not Found: %s' % actual_obj)
+
             job = self.glacier.get_job(job_id=jobId)
             if not job.completed:
                 return
             self.complete_restore(actual_obj, job)
         except Exception as e:
             # Job ID가 만료될 경우 다시 restore 를 시도한다.
-            self.start_object_restoring(actual_obj)
+            if not e.message.startswith('Object Not Found:'):
+                self.start_object_restoring(actual_obj)
             self.logger.info(e)
 
         self.swift.delete_object(self.restoring_object_account,
