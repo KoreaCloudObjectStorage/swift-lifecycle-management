@@ -43,7 +43,7 @@ class TransitionMiddleware(object):
         try:
             glacier = self._init_glacier()
             archive_id = glacier.upload_archive(tmpfile)
-            glacier_obj = '%s-%s' % (self.obj, archive_id)
+            glacier_obj = make_glacier_hidden_object_name(self.obj, archive_id)
         except Exception as e:
             return Response(status=HTTP_INTERNAL_SERVER_ERROR, body=e.message)
         finally:
