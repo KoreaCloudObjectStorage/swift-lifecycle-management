@@ -1,7 +1,7 @@
 import ast
 import calendar
+import dateutil.parser
 from copy import copy
-from datetime import datetime
 from operator import itemgetter
 
 from swift.common.http import is_success
@@ -236,8 +236,7 @@ def calc_when_actions_do(rule, from_time):
         action = rule[key]
         time = None
         if 'Date' in action:
-            time = calendar.timegm(datetime.strptime(action['Date'],
-                                                     '%Y-%m-%dT%H:%M:%S+00:00')
+            time = calendar.timegm(dateutil.parser.parse(action['Date'])
                                    .timetuple())
         elif 'Days' in action:
             time = calc_nextDay(from_time) + int(action['Days']) * DAY_SECONDS

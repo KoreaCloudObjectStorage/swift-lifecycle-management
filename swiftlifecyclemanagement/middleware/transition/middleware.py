@@ -13,6 +13,8 @@ from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path, normalize_timestamp
 
 from swiftlifecyclemanagement.common.lifecycle import GLACIER_FLAG_META
+from swiftlifecyclemanagement.common.utils import \
+    make_glacier_hidden_object_name
 
 
 class TransitionMiddleware(object):

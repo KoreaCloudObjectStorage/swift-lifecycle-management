@@ -1,4 +1,5 @@
 # coding=utf-8
+import dateutil.parser
 import xml.etree.ElementTree as ET
 import time
 from copy import copy
@@ -77,8 +78,16 @@ def parseAction(action_name, rule):
     if action.find('Date') is not None:
         # 하나의 action에 days와 date가 동시에 설정 시, days로 설정된다.
         if daysSet is False:
-            # TODO Date 가 ISO 8601 Formate 이고 0시로 설정되었는지 검사
             actiondic['Date'] = action.find('Date').text
+            timetuple = dateutil.parser.parse(actiondic['Date']).timetuple()
+            for i in range(3, 6):
+                if timetuple[i] == 0:
+                    continue
+                exceptionMsg = dict()
+                exceptionMsg['status'] = 400
+                exceptionMsg['code'] = 'InvalidArgument'
+                exceptionMsg['msg'] = "'Date' must be at midnight GMT'"
+                raise LifecycleConfigException(exceptionMsg)
 
     if action_name == "Transition":
         actiondic['StorageClass'] = action.find("StorageClass").text
