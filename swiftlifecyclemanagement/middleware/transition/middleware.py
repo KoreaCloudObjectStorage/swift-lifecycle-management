@@ -6,7 +6,7 @@ from copy import copy
 
 from boto.glacier.layer2 import Layer2
 
-from swift.common.http import HTTP_NO_CONTENT
+from swift.common.http import HTTP_NO_CONTENT, HTTP_INTERNAL_SERVER_ERROR
 from swift.common.bufferedhttp import http_connect
 from swift.common.ring import Ring
 from swift.common.swob import Request, Response
@@ -26,8 +26,6 @@ class TransitionMiddleware(object):
         self.glacier_account_prefix = '.glacier_'
         self.temp_path = conf.get('temp_path', '/var/cache/s3/')
 
-        self.glacier = self._init_glacier()
-
     def _init_glacier(self):
         con = Layer2()
         return con.get_vault('swift-s3-transition')
@@ -43,8 +41,11 @@ class TransitionMiddleware(object):
         # Glacier로 업로드
         tmpfile = self.save_to_tempfile(obj_body)
         try:
-            archive_id = self.glacier.upload_archive(tmpfile)
-            glacier_obj = make_glacier_hidden_object_name(self.obj, archive_id)
+            glacier = self._init_glacier()
+            archive_id = glacier.upload_archive(tmpfile)
+            glacier_obj = '%s-%s' % (self.obj, archive_id)
+        except Exception as e:
+            return Response(status=HTTP_INTERNAL_SERVER_ERROR, body=e.message)
         finally:
             self.delete_tempfile(tmpfile)
 
