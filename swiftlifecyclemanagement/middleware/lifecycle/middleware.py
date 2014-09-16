@@ -2,9 +2,11 @@
 import time
 import xml.etree.ElementTree as ET
 import urlparse
+from base64 import encodestring as encodebytes
 from urllib2 import unquote
 from operator import itemgetter
 from copy import copy
+from hashlib import md5
 
 from swift.common.swob import Request, Response
 from swift.common.utils import get_logger, split_path, \
@@ -22,7 +24,7 @@ from utils import xml_to_list, lifecycle_to_xml, get_status_int, \
     updateLifecycleMetadata, check_lifecycle_validation, \
     make_object_metadata_from_rule
 from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
-    CONTAINER_LIFECYCLE_NOT_EXIST, \
+    CONTAINER_LIFECYCLE_NOT_EXIST, CONTAINER_RULE_DISABLED, \
     LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
     CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, \
     CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do, LIFECYCLE_NOT_EXIST,\
@@ -70,9 +72,12 @@ class ObjectController(WSGIContext):
         last_modified = gmt_to_timestamp(headers['Last-Modified'])
 
         is_glacier = False
-        if object_s3_storage_class == 'GLACIER' and \
-           'X-Object-Meta-S3-Restore' not in headers:
+        if object_s3_storage_class == 'GLACIER':
             is_glacier = True
+
+        restoring = headers.get('X-Object-Meta-S3-Restore')
+        if restoring != 'ongoing-request="true"':
+            is_glacier = False
 
         # Glacier로 Transition 된 Object 일 경우
         if is_glacier and env['REQUEST_METHOD'] == 'GET':
@@ -127,7 +132,8 @@ class ObjectController(WSGIContext):
         resp = req.get_response(self.app)
 
         if obj_lc_status in (LIFECYCLE_NOT_EXIST,
-                             CONTAINER_LIFECYCLE_NOT_EXIST):
+                             CONTAINER_LIFECYCLE_NOT_EXIST,
+                             CONTAINER_RULE_DISABLED):
             return resp
 
         lifecycle.reload()
@@ -172,15 +178,13 @@ class ObjectController(WSGIContext):
         if not lifecycle:
             return self.app
 
-        actionList = dict()
-        headers = dict()
+        rule = container_lc.get_rule_by_object_name(self.object)
 
-        for rule in lifecycle:
-            prefix = rule['Prefix']
-            if self.object.startswith(prefix):
-                headers = make_object_metadata_from_rule(rule)
-                actionList = calc_when_actions_do(rule, time.time())
-                break
+        if rule['Status'].lower() == 'disabled':
+            return self.app
+
+        headers = make_object_metadata_from_rule(rule)
+        actionList = calc_when_actions_do(rule, time.time())
 
         if actionList:
             for action, at_time in actionList.iteritems():
@@ -376,8 +380,25 @@ class LifecycleManageController(WSGIContext):
     def PUT(self, env, start_response):
         try:
             req = Request(copy(env))
+
+            if 'Content-MD5' not in req.headers:
+                exceptMsg = dict()
+                exceptMsg['status'] = 400
+                exceptMsg['code'] = 'InvalidRequest'
+                exceptMsg['msg'] = 'Missing required header for this ' \
+                                   'request: Content-MD5'
+                raise LifecycleConfigException(exceptMsg)
+
             lifecycle_xml = req.body
             lifecycle = xml_to_list(lifecycle_xml)
+
+            xml_base64 = self.compute_xml_hash(lifecycle_xml)
+            if xml_base64 != req.headers['Content-MD5']:
+                exceptMsg = dict()
+                exceptMsg['status'] = 400
+                exceptMsg['code'] = 'InvalidRequest'
+                exceptMsg['msg'] = 'Content-MD5 does not correct'
+                raise LifecycleConfigException(exceptMsg)
 
             container_lc = ContainerLifecycle(self.account, self.container,
                                               env=env, app=self.app)
@@ -419,8 +440,23 @@ class LifecycleManageController(WSGIContext):
             self.update_hidden_s3_account(self.account, self.container)
         except LifecycleConfigException as e:
             return get_err_response(e.message)
+        except Exception:
+            msg = dict()
+            msg['status'] = 400
+            msg['code'] = 'MalformedXML'
+            msg['msg'] = 'The XML you provided was not well-formed or did ' \
+                         'not validate against our published schema'
+            return get_err_response(msg)
         return Response(status=200, app_iter='True',
                         headers={LIFECYCLE_RESPONSE_HEADER: True})
+
+    def compute_xml_hash(self, xml):
+        xml_md5 = md5()
+        xml_md5.update(xml)
+        xml_base64 = encodebytes(xml_md5.digest()).encode('utf-8')
+        if xml_base64[-1] == '\n':
+            xml_base64 = xml_base64[0:-1]
+        return xml_base64
 
     def update_hidden_s3_account(self, account, container):
         path = '/%s/%s/%s' % (self.s3_accounts, account, container)

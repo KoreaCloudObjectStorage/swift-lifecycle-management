@@ -26,9 +26,26 @@ def iter_objects_by_prefix(account, container, prefix, swift_client):
     resp = swift_client.make_request('GET', '%s?%s' % (path, param), {},
                                      (2, 4))
     if not resp.status_int == 200:
-        break
+        return
     data = json.loads(resp.body)
     if not data:
-        break
+        return
     for item in data:
         yield item
+
+
+def make_glacier_hidden_object_name(orig_info, glacier_key):
+    keylength = len(glacier_key)
+    return '%s-%s-%s' % (keylength, glacier_key, orig_info)
+
+
+def get_glacier_key_from_hidden_object(hidden_obj):
+    keylen = hidden_obj.split('-', 1)[0]
+    startpoint = len(keylen)+1
+    return hidden_obj[startpoint:int(keylen)+startpoint]
+
+
+def get_glacier_objname_from_hidden_object(hidden_obj):
+    keylen = hidden_obj.split('-', 1)[0]
+    startlen = len(keylen)+int(keylen)+2
+    return hidden_obj[startlen:]

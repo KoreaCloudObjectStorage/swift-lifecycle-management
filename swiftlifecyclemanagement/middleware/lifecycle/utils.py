@@ -1,4 +1,5 @@
 # coding=utf-8
+import dateutil.parser
 import xml.etree.ElementTree as ET
 import time
 from copy import copy
@@ -16,12 +17,12 @@ def xml_to_list(xml):
     for rule in rules:
         ruledata = dict()
 
-        prefix = rule.find("Prefix").text
-
-        if prefix is None:
+        if rule.find('Prefix') is not None and rule.find('Prefix').text:
+            prefix = rule.find("Prefix").text
+        else:
             prefix = ''
 
-        if rule.find('ID').text is not None:
+        if rule.find('ID') is not None and rule.find('ID').text:
             id = rule.find("ID").text
         else:
             id = 'Rule for '
@@ -77,8 +78,16 @@ def parseAction(action_name, rule):
     if action.find('Date') is not None:
         # 하나의 action에 days와 date가 동시에 설정 시, days로 설정된다.
         if daysSet is False:
-            # TODO Date 가 ISO 8601 Formate 이고 0시로 설정되었는지 검사
             actiondic['Date'] = action.find('Date').text
+            timetuple = dateutil.parser.parse(actiondic['Date']).timetuple()
+            for i in range(3, 6):
+                if timetuple[i] == 0:
+                    continue
+                exceptionMsg = dict()
+                exceptionMsg['status'] = 400
+                exceptionMsg['code'] = 'InvalidArgument'
+                exceptionMsg['msg'] = "'Date' must be at midnight GMT'"
+                raise LifecycleConfigException(exceptionMsg)
 
     if action_name == "Transition":
         actiondic['StorageClass'] = action.find("StorageClass").text
@@ -145,10 +154,7 @@ def check_lifecycle_validation(rulelist):
 
     # TODO 1000개가 넘을 경우 정확히 어떤 메세지가 오는지 확인해야함.
     if length > 1000:
-        exceptionMsg = dict()
-        exceptionMsg['code'] = "OverUploadedRules"
-        exceptionMsg['msg'] = "1000"
-        raise LifecycleConfigException(exceptionMsg)
+        raise Exception
 
     for base, comp in _iter_list_to_compare(sortedList):
         basePrefix = base['Prefix']
