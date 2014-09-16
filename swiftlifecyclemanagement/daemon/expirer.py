@@ -3,6 +3,8 @@ import hashlib
 from random import random
 from time import time
 from os.path import join
+
+from boto.glacier.layer2 import Layer2
 from eventlet import sleep, Timeout
 from eventlet.greenpool import GreenPool
 
@@ -14,7 +16,8 @@ from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT
 
 from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
     LIFECYCLE_OK, calc_when_actions_do
-from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
+from swiftlifecyclemanagement.common.utils import gmt_to_timestamp, \
+    get_objects_by_prefix
 
 
 class ObjectExpirer(Daemon):
@@ -32,6 +35,8 @@ class ObjectExpirer(Daemon):
         self.swift = InternalClient(conf_path,
                                     'Swift Object Expirer',
                                     request_tries)
+        self.glacier = self._init_glacier()
+        self.glacier_account_prefix = '.glacier_'
         self.report_interval = int(conf.get('report_interval') or 300)
         self.report_first_time = self.report_last_time = time()
         self.report_objects = 0
@@ -43,6 +48,10 @@ class ObjectExpirer(Daemon):
             raise ValueError("concurrency must be set to at least 1")
         self.processes = int(self.conf.get('processes', 0))
         self.process = int(self.conf.get('process', 0))
+
+    def _init_glacier(self):
+        con = Layer2()
+        return con.get_vault('swift-s3-transition')
 
     def report(self, final=False):
         """
@@ -193,7 +202,8 @@ class ObjectExpirer(Daemon):
                 actual_expire_time = int(times['Expiration'])
                 if actual_expire_time == int(hidden_container):
                     self.delete_actual_object(obj)
-
+                if lifecycle.get_s3_storage_class() == 'GLACIER':
+                    self.delete_glacier_object(obj)
             self.report_objects += 1
             self.logger.increment('objects')
         except (Exception, Timeout) as err:
@@ -207,6 +217,16 @@ class ObjectExpirer(Daemon):
 
         self.logger.timing_since('timing', start_time)
         self.report()
+
+    def delete_glacier_object(self, obj):
+        account, container, prefix = obj.split('/', 2)
+        glacier_hidden_account = self.glacier_account_prefix + account
+        objs = get_objects_by_prefix(glacier_hidden_account, container, prefix,
+                                     self.swift)
+        hidden_obj = objs[0]
+        glacier_archive_id = hidden_obj.split('-', 1)[1]
+        self.glacier.delete_archive(glacier_archive_id)
+        self.swift.delete_object(glacier_hidden_account, container, hidden_obj)
 
     def delete_actual_object(self, obj):
         """

@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import hashlib
-import json
 from time import time
 from random import random
 from os.path import join
@@ -21,7 +20,8 @@ from swiftlifecyclemanagement.common.lifecycle import \
     CONTAINER_LIFECYCLE_SYSMETA, Lifecycle, \
     OBJECT_LIFECYCLE_NOT_EXIST, LIFECYCLE_OK, LIFECYCLE_ERROR, \
     CONTAINER_LIFECYCLE_IS_UPDATED, calc_when_actions_do, ContainerLifecycle
-from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
+from swiftlifecyclemanagement.common.utils import gmt_to_timestamp, \
+    get_objects_by_prefix
 from swiftlifecyclemanagement.middleware.lifecycle.utils import \
     make_object_metadata_from_rule
 
@@ -191,7 +191,8 @@ class LifecyclePropagator(Daemon):
 
     def propagate_rule(self, account, container, rule):
         prefix = rule['Prefix']
-        objects = self.get_objects_by_prefix(account, container, prefix)
+        objects = get_objects_by_prefix(account, container, prefix,
+                                        self.swift)
         propagated = True
         for o in objects:
             lc = Lifecycle(account, container, o, swift_client=self.swift)
@@ -243,26 +244,6 @@ class LifecyclePropagator(Daemon):
                 result.append(rule)
             to_append = False
         return result
-
-    def get_objects_by_prefix(self, account, container, prefix):
-        iter_objs = self.iter_objects_by_prefix(account, container, prefix)
-        objs = list()
-        for o in iter_objs:
-            objs.append(o['name'])
-        return objs
-
-    def iter_objects_by_prefix(self, account, container, prefix):
-        path = self.swift.make_path(account, container)
-        param = 'format=json&prefix=%s' % prefix
-        resp = self.swift.make_request('GET', '%s?%s' % (path, param), {},
-                                       (2, 4))
-        if not resp.status_int == 200:
-            return
-        data = json.loads(resp.body)
-        if not data:
-            return
-        for item in data:
-            yield item
 
     def set_rule_propagated(self, rule):
         for key in ('Expiration', 'Transition'):
