@@ -5,7 +5,7 @@ import time
 from copy import copy
 
 from swiftlifecyclemanagement.common.lifecycle import \
-    CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META
+    CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META, calc_when_actions_do
 from exceptions import LifecycleConfigException
 
 
@@ -56,6 +56,18 @@ def xml_to_list(xml):
                                       'Transition actions' \
                                       'in lifecycle rule for prefix \'%s\'' \
                                       % prefix
+                raise LifecycleConfigException(exceptionMsg)
+
+            actions = calc_when_actions_do(ruledata, time.time())
+            if actions['Transition'] >= actions['Expiration']:
+                type = 'Days' if 'Days' in ruledata['Expiration'] else 'Date'
+                exceptionMsg = dict()
+                exceptionMsg['status'] = 400
+                exceptionMsg['code'] = 'InvalidRequest'
+                exceptionMsg['msg'] = "'%s' in the Expiration action for " \
+                                      "prefix '%s' must be greater than '%s'" \
+                                      " in the Transition action" \
+                                      % (type, ruledata['Prefix'], type)
                 raise LifecycleConfigException(exceptionMsg)
 
         rulelist.append(ruledata)
@@ -200,7 +212,8 @@ def check_lifecycle_validation(rulelist):
         action_data = [r[k].keys() for r in (base, comp) for k in (
             'Expiration', 'Transition') if k in r]
         action_data = [i for s in action_data for i in s]
-        is_mixed = len(({'Days', 'Date'} - set(action_data)))
+        day_type = ({'Days', 'Date'} - set(action_data))
+        is_mixed = len(day_type)
         if is_mixed == 0:
             exceptionMsg = dict()
             exceptionMsg['status'] = 400
@@ -210,6 +223,35 @@ def check_lifecycle_validation(rulelist):
                                   'in lifecycle rule for prefixs \'%s\'' \
                                   'and \'%s\'' % (basePrefix, comparePrefix)
             raise LifecycleConfigException(exceptionMsg)
+
+        # Transition 시간이 Expiration 시간보다 앞에 있는지 검사
+        base_action = calc_when_actions_do(base, time.time())
+        comp_action = calc_when_actions_do(comp, time.time())
+        base_action['Prefix'] = base['Prefix']
+        comp_action['Prefix'] = comp['Prefix']
+        day_type = ({'Days', 'Date'} - day_type).pop()
+        exp_time = None
+        tr_time = None
+
+        for r in (base_action, comp_action):
+            if 'Expiration' in r:
+                exp_time = [r['Prefix'], r['Expiration']]
+
+            if 'Transition' in r:
+                tr_time = [r['Prefix'], r['Transition']]
+
+        if exp_time and tr_time:
+            if tr_time[1] >= exp_time[1]:
+                exceptionMsg = dict()
+                exceptionMsg['status'] = 400
+                exceptionMsg['code'] = 'InvalidRequest'
+                exceptionMsg['msg'] = "'%s' in the Expiration action for " \
+                                      "prefix '%s' must be greater than '%s'" \
+                                      " in the Transition action for prefix " \
+                                      "'%s'" \
+                                      % (day_type, exp_time[0], day_type,
+                                         tr_time[0])
+                raise LifecycleConfigException(exceptionMsg)
 
 
 def _iter_list_to_compare(sortedlist):
