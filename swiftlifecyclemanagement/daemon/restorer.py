@@ -35,7 +35,7 @@ from swift.common.utils import get_logger, dump_recon_cache, \
 from swiftlifecyclemanagement.common.lifecycle import calc_nextDay
 from swiftlifecyclemanagement.common.utils import \
     get_glacier_key_from_hidden_object, \
-    get_glacier_objname_from_hidden_object, make_glacier_hidden_object_name
+    get_glacier_objname_from_hidden_object, make_glacier_hidden_object_name, get_objects_by_prefix
 
 
 class ObjectRestorer(Daemon):
@@ -206,7 +206,6 @@ class ObjectRestorer(Daemon):
     def start_object_restoring(self, obj):
         start_time = time()
         try:
-            # OBJECT 형태 len(archiveid)-archiveid-a/c/o
             actual_obj = obj
             account, container, obj = actual_obj.split('/', 2)
             archiveId = self.get_archiveid(account, container, obj)
@@ -223,7 +222,7 @@ class ObjectRestorer(Daemon):
                                       restoring_obj, metadata=meta)
 
             self.swift.delete_object(self.restoring_object_account,
-                                     self.todo_container, obj)
+                                     self.todo_container, actual_obj)
             self.report_objects += 1
             self.logger.increment('objects')
         except (Exception, Timeout) as err:
@@ -237,14 +236,17 @@ class ObjectRestorer(Daemon):
     def get_archiveid(self, account, container, obj):
         glacier_account = '%s%s' % (self.glacier_account_prefix, account)
 
-        hobj = None
-        for o in self.swift.iter_objects(glacier_account, container):
-            hobj = o['name']
-            aobj = get_glacier_objname_from_hidden_object(hobj)
-
-            if aobj == obj:
+        glacier_obj = None
+        for o in get_objects_by_prefix(glacier_account, container, obj,
+                                       swift_client=self.swift):
+            name = get_glacier_objname_from_hidden_object(o)
+            if name == obj:
+                glacier_obj = o
                 break
-        return get_glacier_key_from_hidden_object(hobj)
+        if glacier_obj is None:
+            return None
+
+        return get_glacier_key_from_hidden_object(glacier_obj)
 
     def check_object_restored(self, restoring_object):
         actual_obj = get_glacier_objname_from_hidden_object(restoring_object)
