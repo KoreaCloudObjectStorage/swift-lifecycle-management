@@ -10,7 +10,7 @@ from eventlet.greenpool import GreenPool
 
 from swift import gettext_ as _
 from swift.common.daemon import Daemon
-from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT, is_success
+from swift.common.http import is_success
 from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
 

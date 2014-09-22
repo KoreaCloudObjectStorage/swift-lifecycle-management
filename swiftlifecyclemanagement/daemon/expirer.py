@@ -17,7 +17,8 @@ from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT
 from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
     LIFECYCLE_OK, calc_when_actions_do
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp, \
-    get_objects_by_prefix
+    get_objects_by_prefix, get_glacier_objname_from_hidden_object, \
+    get_glacier_key_from_hidden_object
 
 
 class ObjectExpirer(Daemon):
@@ -222,11 +223,19 @@ class ObjectExpirer(Daemon):
         account, container, prefix = obj.split('/', 2)
         glacier_hidden_account = self.glacier_account_prefix + account
         objs = get_objects_by_prefix(glacier_hidden_account, container, prefix,
-                                     self.swift)
-        hidden_obj = objs[0]
-        glacier_archive_id = hidden_obj.split('-', 1)[1]
+                                     swift_client=self.swift)
+
+        glacier_obj = None
+        for o in objs:
+            name = get_glacier_objname_from_hidden_object(o)
+            if name == prefix:
+                glacier_obj = o
+                break
+
+        glacier_archive_id = get_glacier_key_from_hidden_object(glacier_obj)
         self.glacier.delete_archive(glacier_archive_id)
-        self.swift.delete_object(glacier_hidden_account, container, hidden_obj)
+        self.swift.delete_object(glacier_hidden_account, container,
+                                 glacier_obj)
 
     def delete_actual_object(self, obj):
         """

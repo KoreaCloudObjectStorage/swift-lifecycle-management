@@ -192,7 +192,7 @@ class LifecyclePropagator(Daemon):
     def propagate_rule(self, account, container, rule):
         prefix = rule['Prefix']
         objects = get_objects_by_prefix(account, container, prefix,
-                                        self.swift)
+                                        swift_client=self.swift)
         propagated = True
         for o in objects:
             lc = Lifecycle(account, container, o, swift_client=self.swift)

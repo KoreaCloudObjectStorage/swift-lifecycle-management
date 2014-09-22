@@ -3,6 +3,7 @@ import time
 import xml.etree.ElementTree as ET
 import urlparse
 from base64 import encodestring as encodebytes
+from boto.glacier.layer2 import Layer2
 from urllib2 import unquote
 from operator import itemgetter
 from copy import copy
@@ -19,7 +20,9 @@ from swift.common.bufferedhttp import http_connect
 from swift.common.request_helpers import is_user_meta
 
 from exceptions import LifecycleConfigException
-from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
+from swiftlifecyclemanagement.common.utils import gmt_to_timestamp, \
+    get_objects_by_prefix, get_glacier_key_from_hidden_object, \
+    get_glacier_objname_from_hidden_object
 from utils import xml_to_list, lifecycle_to_xml, get_status_int, \
     updateLifecycleMetadata, check_lifecycle_validation, \
     make_object_metadata_from_rule
@@ -28,7 +31,7 @@ from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
     LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
     CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, \
     CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do, LIFECYCLE_NOT_EXIST,\
-    ContainerLifecycle
+    ContainerLifecycle, ObjectLifecycle
 
 
 def get_err_response(err):
@@ -76,7 +79,7 @@ class ObjectController(WSGIContext):
             is_glacier = True
 
         restoring = headers.get('X-Object-Meta-S3-Restore')
-        if restoring != 'ongoing-request="true"':
+        if restoring and restoring != 'ongoing-request="true"':
             is_glacier = False
 
         # Glacier로 Transition 된 Object 일 경우
@@ -117,7 +120,7 @@ class ObjectController(WSGIContext):
 
             #Update Hidden Information
             for key in actionList:
-                self.hidden_update(env, hidden={
+                self.hidden_update(hidden={
                     'account': self.hidden_accounts[key.lower()],
                     'container': actionList[key]
                 }, orig={
@@ -153,8 +156,12 @@ class ObjectController(WSGIContext):
         return self.GETorHEAD(env, start_response)
 
     def DELETE(self, env, start_response):
-        # TODO Object Delete 시, transition 된 object 일 경우, Glacier 에서도 지워야하고
-        # hidden account(.glacier_[account] 에서도 지워야함
+        lc = ObjectLifecycle(self.account, self.container, self.object,
+                             env=env, app=self.app)
+
+        if lc.get_s3_storage_class() == 'GLACIER':
+            self.delete_glacier_object()
+
         return self.app
 
     def HEAD(self, env, start_response):
@@ -171,8 +178,14 @@ class ObjectController(WSGIContext):
         return Response(status=HTTP_BAD_REQUEST)
 
     def PUT(self, env, start_response):
-        container_lc = ContainerLifecycle(self.account, self.container,
-                                          env=env, app=self.app)
+        lc = Lifecycle(self.account, self.container, self.object, env=env,
+                       app=self.app)
+        container_lc = lc.container
+
+        is_glacier = lc.get_s3_storage_class()
+
+        if is_glacier == 'GLACIER':
+            self.delete_glacier_object()
 
         lifecycle = container_lc.get_lifecycle()
         if not lifecycle:
@@ -190,7 +203,7 @@ class ObjectController(WSGIContext):
             for action, at_time in actionList.iteritems():
                 hidden_account = self.hidden_accounts[action.lower()]
                 action_at = at_time
-                self.hidden_update(env, hidden=dict({
+                self.hidden_update(hidden=dict({
                     'account': hidden_account,
                     'container': action_at
                 }), orig=dict({
@@ -203,9 +216,13 @@ class ObjectController(WSGIContext):
         req.headers.update(headers)
         return req.get_response(self.app)
 
-    def hidden_update(self, env, hidden, orig):
-        hidden_obj = '%s/%s/%s' % (orig['account'], orig['container'],
-                                   orig['object'])
+    def hidden_update(self, hidden, orig, method='PUT'):
+        if type(orig) is dict:
+            hidden_obj = '%s/%s/%s' % (orig['account'], orig['container'],
+                                       orig['object'])
+        else:
+            hidden_obj = orig
+
         hidden_path = '/%s/%s/%s' % (hidden['account'], hidden['container'],
                                      hidden_obj)
         part, nodes = self.container_ring.get_nodes(hidden['account'],
@@ -217,15 +234,40 @@ class ObjectController(WSGIContext):
             action_headers = dict()
             action_headers['user-agent'] = 'lifecycle'
             action_headers['X-Timestamp'] = normalize_timestamp(time.time())
-            action_headers['referer'] = Request(copy(env)).as_referer()
+            action_headers['referer'] = 'lifecycle-middleware'
             action_headers['x-size'] = '0'
             action_headers['x-content-type'] = "text/plain"
             action_headers['x-etag'] = 'd41d8cd98f00b204e9800998ecf8427e'
 
-            conn = http_connect(ip, port, dev, part, "PUT", hidden_path,
+            conn = http_connect(ip, port, dev, part, method, hidden_path,
                                 action_headers)
             response = conn.getresponse()
             response.read()
+
+    def delete_glacier_object(self):
+        objs = get_objects_by_prefix('.glacier_%s' % self.account,
+                                     self.container, self.object, app=self.app)
+        glacier_obj = None
+        for o in objs:
+            name = get_glacier_objname_from_hidden_object(o)
+            if name == self.object:
+                glacier_obj = o
+                break
+
+        if not glacier_obj:
+            return
+
+        archive_id = get_glacier_key_from_hidden_object(glacier_obj)
+        try:
+            vault = Layer2().get_vault('swift-s3-transition')
+            vault.delete_archive(archive_id)
+            self.hidden_update(
+                hidden={'account': '.glacier_' + self.account,
+                        'container': self.container},
+                orig=glacier_obj, method='DELETE')
+        except Exception as e:
+            # Print Error Log
+            raise e
 
     def restore_object(self, env):
         req = Request(env)
