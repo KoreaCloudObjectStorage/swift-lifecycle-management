@@ -46,14 +46,14 @@ def xml_to_list(xml):
             ruledata['Expiration'] = expiration
 
         if expiration and transition:
-            if 'Days' in (expiration or transition) and \
-               'Date' in (expiration and transition):
+            days_or_date = set(['Days', 'Date']) - set(transition.keys() + expiration.keys())
+            if len(days_or_date) == 0:
                 exceptionMsg = dict()
                 exceptionMsg['status'] = 400
                 exceptionMsg['code'] = 'InvalidRequest'
                 exceptionMsg['msg'] = 'Found mixed \'Date\' and \'Days\' ' \
                                       'based Expiration and ' \
-                                      'Transition actions' \
+                                      'Transition actions ' \
                                       'in lifecycle rule for prefix \'%s\'' \
                                       % prefix
                 raise LifecycleConfigException(exceptionMsg)
