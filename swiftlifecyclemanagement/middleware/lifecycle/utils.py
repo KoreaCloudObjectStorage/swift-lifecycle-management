@@ -103,6 +103,8 @@ def parseAction(action_name, rule):
 
     if action_name == "Transition":
         actiondic['StorageClass'] = action.find("StorageClass").text
+        if actiondic['StorageClass'] != 'GLACIER':
+            raise Exception()
 
     actiondic['LastModified'] = normalize_timestamp(time.time())
     actiondic['Propagated'] = False
