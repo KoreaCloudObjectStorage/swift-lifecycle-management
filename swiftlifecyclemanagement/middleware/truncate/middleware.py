@@ -32,14 +32,15 @@ class TruncateMiddleware(object):
         # object 파일명을 생성하고, 임시 파일로 대체한다.
         # 따라서 별 다른 truncate를 할 필요가 없다.
 
-        # TODO 원본 etga와 content-length를 저장할 방법 필요
         ori_meta = disk_file.read_metadata()
         metadata = {
             'X-Timestamp': ori_meta['X-Timestamp'],
             'Content-Type': ori_meta['Content-Type'],
             'ETag': 'd41d8cd98f00b204e9800998ecf8427e',
             'Content-Length': 0,
-            'X-Object-Meta-Glacier': True
+            'X-Object-Meta-Glacier': True,
+            'X-Object-Meta-S3-Content-Length': ori_meta['Content-Length'],
+            'X-Object-Meta-S3-ETag': ori_meta['ETag']
         }
         # 원본 Object Metatdata 도 저장
         metadata.update(val for val in ori_meta.iteritems()
