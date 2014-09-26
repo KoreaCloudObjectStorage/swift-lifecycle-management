@@ -19,7 +19,8 @@ from swift.common.http import is_success
 from swiftlifecyclemanagement.common.lifecycle import \
     CONTAINER_LIFECYCLE_SYSMETA, Lifecycle, \
     OBJECT_LIFECYCLE_NOT_EXIST, LIFECYCLE_OK, LIFECYCLE_ERROR, \
-    CONTAINER_LIFECYCLE_IS_UPDATED, calc_when_actions_do, ContainerLifecycle
+    CONTAINER_LIFECYCLE_IS_UPDATED, calc_when_actions_do, ContainerLifecycle, \
+    SKIP_THIS_OBJECT
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp, \
     get_objects_by_prefix
 from swiftlifecyclemanagement.middleware.lifecycle.utils import \
@@ -201,6 +202,9 @@ class LifecyclePropagator(Daemon):
             if validation_flg is LIFECYCLE_OK:
                 continue
 
+            if validation_flg is SKIP_THIS_OBJECT:
+                propagated = False
+                continue
             if validation_flg is LIFECYCLE_ERROR:
                 self.logger.error(_('Lifecycle ERROR'))
                 continue
