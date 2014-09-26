@@ -17,6 +17,7 @@ CONTAINER_LIFECYCLE_IS_UPDATED = 3
 CONTAINER_LIFECYCLE_NOT_EXIST = 4
 OBJECT_LIFECYCLE_NOT_EXIST = 5
 CONTAINER_RULE_DISABLED = 6
+SKIP_THIS_OBJECT = 7
 
 CONTAINER_LIFECYCLE_SYSMETA = 'X-Container-Sysmeta-S3-Lifecycle-Configuration'
 GLACIER_FLAG_META = 'X-Object-Meta-Glacier'
@@ -188,6 +189,9 @@ class Lifecycle(object):
         return lifecycle[rule_id_map.index(rule_id)]
 
     def object_lifecycle_validation(self):
+        if 'X-Object-Manifest' in self.object.headers:
+            return SKIP_THIS_OBJECT
+
         obj_name = self.object.obj_name
         c_rule = self.container.get_rule_actions_by_object_name(obj_name)
         o_rule = self.object.get_rules_actions()
