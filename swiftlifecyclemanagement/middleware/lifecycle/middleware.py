@@ -83,17 +83,26 @@ class ObjectController(WSGIContext):
             is_glacier = False
 
         # Glacier로 Transition 된 Object 일 경우
-        if is_glacier and env['REQUEST_METHOD'] == 'GET':
-            body = '<Error>\n' \
-                   '<Code>InvalidObjectState</Code>\n' \
-                   '<Message>The operation is not valid ' \
-                   'for the object\'s storage class</Message>\n' \
-                   '</Error>\n'
+        if is_glacier:
             resp = Response(headers=headers)
-            resp.body = body
             resp.status = HTTP_FORBIDDEN
             resp.headers[LIFECYCLE_RESPONSE_HEADER] = True
+
+            if env['REQUEST_METHOD'] == 'GET':
+                body = '<Error>\n' \
+                       '<Code>InvalidObjectState</Code>\n' \
+                       '<Message>The operation is not valid ' \
+                       'for the object\'s storage class</Message>\n' \
+                       '</Error>\n'
+                resp.body = body
+                resp.content_type = 'application/xml'
+            elif env['REQUEST_METHOD'] == 'HEAD':
+                resp.content_length = headers[
+                    'X-Object-Meta-S3-Content-Length']
+                resp.etag = headers['X-Object-Meta-S3-ETag']
+
             return resp
+
 
         obj_lc_status = lifecycle.object_lifecycle_validation()
 

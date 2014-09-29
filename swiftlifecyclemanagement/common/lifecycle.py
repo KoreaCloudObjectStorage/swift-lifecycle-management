@@ -16,6 +16,7 @@ LIFECYCLE_NOT_EXIST = 2
 CONTAINER_LIFECYCLE_IS_UPDATED = 3
 CONTAINER_LIFECYCLE_NOT_EXIST = 4
 OBJECT_LIFECYCLE_NOT_EXIST = 5
+SKIP_THIS_OBJECT = 7
 DISABLED_EXPIRATION = 8
 DISABLED_TRANSITION = 9
 DISABLED_BOTH = 10
@@ -197,6 +198,9 @@ class Lifecycle(object):
         return None
 
     def object_lifecycle_validation(self):
+        if 'X-Object-Manifest' in self.object.headers:
+            return SKIP_THIS_OBJECT
+
         obj_name = self.object.obj_name
         c_rule = self.container.get_rule_actions_by_object_name(obj_name)
         o_rule = self.object.get_rules_actions()
