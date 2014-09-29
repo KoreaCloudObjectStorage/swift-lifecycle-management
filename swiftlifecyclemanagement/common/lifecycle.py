@@ -16,16 +16,17 @@ LIFECYCLE_NOT_EXIST = 2
 CONTAINER_LIFECYCLE_IS_UPDATED = 3
 CONTAINER_LIFECYCLE_NOT_EXIST = 4
 OBJECT_LIFECYCLE_NOT_EXIST = 5
-CONTAINER_RULE_DISABLED = 6
+DISABLED_EXPIRATION = 8
+DISABLED_TRANSITION = 9
+DISABLED_BOTH = 10
 
 CONTAINER_LIFECYCLE_SYSMETA = 'X-Container-Sysmeta-S3-Lifecycle-Configuration'
 GLACIER_FLAG_META = 'X-Object-Meta-Glacier'
 LIFECYCLE_RESPONSE_HEADER = 'X-Lifecycle-Response'
 
 OBJECT_LIFECYCLE_META = {
-    'ID': 'X-Object-Meta-S3-Lifecycle-Configuration-Rule-Id',
-    'Expiration': 'X-Object-Meta-S3-Expiration-Last-Modified',
-    'Transition': 'X-Object-Meta-S3-Transition-Last-Modified'
+    'Expiration': 'X-Object-Meta-S3-Expiration-',
+    'Transition': 'X-Object-Meta-S3-Transition-'
 }
 
 DAY_SECONDS = 86400
@@ -72,41 +73,47 @@ class ContainerLifecycle(LifecycleCommon):
         self._initialize()
 
     def get_rule_actions_by_object_name(self, prefix):
-        rule = self.get_rule_by_object_name(prefix)
+        rules = self.get_rules_by_object_name(prefix)
 
-        if not rule:
+        if not rules:
             return None
 
-        if rule['Status'].lower() == 'disabled':
-            return CONTAINER_RULE_DISABLED
-
         rule_info = dict()
-        rule_info['ID'] = rule['ID']
-        for key in rule:
-            if key in ('Expiration', 'Transition'):
-                rule_info[key] = rule[key]['LastModified']
-
+        for rule in rules:
+            for key in rule:
+                if key in ('Expiration', 'Transition'):
+                    rule_info[key+'-Id'] = rule['ID']
+                    rule_info[key] = rule[key]['LastModified']
+                    rule_info[key+'-Status'] = rule['Status']
         return rule_info
 
-    def get_rule_by_object_name(self, obj_name):
+    def get_rules_by_object_name(self, obj_name):
         lifecycle = self.get_lifecycle()
 
         if not lifecycle:
             return None
 
-        prefixMap = map(itemgetter('Prefix'), lifecycle)
-
-        prefixIndex = -1
+        sortedlist = sorted(lifecycle, key=lambda k: k['Prefix'])
+        prefixMap = map(itemgetter('Prefix'), sortedlist)
+        rules = list()
         for p in prefixMap:
-            if obj_name.startswith(p):
-                prefixIndex = prefixMap.index(p)
+            if p > obj_name:
+                break
+                
+            # The maximum number of rules for object are two,
+            # so if rules length is 2, escape for loop.
+            if len(rules) == 2:
                 break
 
-        if prefixIndex < 0:
-            return None
+            if obj_name.startswith(p):
+                prefixIndex = prefixMap.index(p)
+                rule = sortedlist[prefixIndex]
+                rules.append(rule)
 
-        rule = lifecycle[prefixIndex]
-        return rule
+        if len(rules) == 0:
+            return []
+
+        return rules
 
     def get_lifecycle(self):
         if not self.headers or CONTAINER_LIFECYCLE_SYSMETA not in self.headers:
@@ -128,20 +135,30 @@ class ObjectLifecycle(LifecycleCommon):
                                  swift_client=swift_client,
                                  env=env, app=app)
         self.path = '/v1/%s/%s/%s' % (account, container, obj)
-        self.obj_name = obj;
+        self.obj_name = obj
         self._initialize()
 
     def get_rules_actions(self):
-        if not self.headers or \
-           OBJECT_LIFECYCLE_META['ID'] not in self.headers:
+        if not self.headers:
             return None
 
         lifecycle = dict()
-        lifecycle['ID'] = self.headers[OBJECT_LIFECYCLE_META['ID']]
-        for key, value in self.headers.iteritems():
-            if key in (OBJECT_LIFECYCLE_META['Expiration'],
-                       OBJECT_LIFECYCLE_META['Transition']):
-                lifecycle[key.split('-', 5)[4]] = value
+
+        for meta_prefix in (OBJECT_LIFECYCLE_META['Expiration'],
+                            OBJECT_LIFECYCLE_META['Transition']):
+            id_meta = meta_prefix + "Rule-Id"
+            rule_id = self.headers.get(id_meta, None)
+            if not rule_id:
+                continue
+
+            action = meta_prefix.split('-', 5)[4]
+            lifecycle['%s-Id' % action] = rule_id
+            lifecycle[action] = self.headers[meta_prefix+'Last-Modified']
+            lifecycle[action+'-Status'] = 'Enabled'
+
+        if len(lifecycle) == 0:
+            return None
+
         return lifecycle
 
     def get_s3_storage_class(self):
@@ -162,6 +179,7 @@ class Lifecycle(object):
         self.swift_client = swift_client
         self.env = env
         self.app = app
+        self.obj = obj
         self.object = ObjectLifecycle(account, container, obj, env=env,
                                       app=app, swift_client=swift_client)
         self.container = ContainerLifecycle(account, container, env=env,
@@ -171,30 +189,19 @@ class Lifecycle(object):
     def get_s3_storage_class(self):
         return self.object.get_s3_storage_class()
 
-    def get_object_lifecycle(self):
-        lifecycle = self.container.get_lifecycle()
-
-        rules_actions = self.object.get_rules_actions()
-
-        if not lifecycle or not rules_actions:
-            return None
-
-        rule_id = rules_actions['ID']
-        rule_id_map = map(itemgetter('ID'), lifecycle)
-
-        if rule_id not in rule_id_map:
-            return None
-
-        return lifecycle[rule_id_map.index(rule_id)]
+    def get_object_rule_by_action(self, action):
+        rules = self.container.get_rules_by_object_name(self.obj)
+        for rule in rules:
+            if action in rule:
+                return rule
+        return None
 
     def object_lifecycle_validation(self):
         obj_name = self.object.obj_name
         c_rule = self.container.get_rule_actions_by_object_name(obj_name)
         o_rule = self.object.get_rules_actions()
 
-        if c_rule == CONTAINER_RULE_DISABLED:
-            return CONTAINER_RULE_DISABLED
-
+        rule_status = None
         if c_rule:
             if o_rule:
                 if c_rule == o_rule:
@@ -209,6 +216,14 @@ class Lifecycle(object):
                         continue
 
                     if c_rule[key] == o_rule[key]:
+                        if c_rule[key+'-Status'].lower() == 'disabled':
+                            if rule_status:
+                                rule_status = DISABLED_BOTH
+                                break
+                            if key == 'Expiration':
+                                rule_status = DISABLED_EXPIRATION
+                            if key == 'Transition':
+                                rule_status = DISABLED_TRANSITION
                         continue
                     elif c_rule[key] > o_rule[key]:
                         return CONTAINER_LIFECYCLE_IS_UPDATED
@@ -221,6 +236,7 @@ class Lifecycle(object):
                 return CONTAINER_LIFECYCLE_NOT_EXIST
             else:
                 return LIFECYCLE_NOT_EXIST
+        return rule_status
 
     def reload(self):
         self.object.reload()

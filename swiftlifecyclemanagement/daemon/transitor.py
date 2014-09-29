@@ -15,7 +15,7 @@ from swift.common.internal_client import InternalClient
 from swift.common.utils import get_logger, dump_recon_cache
 
 from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
-    LIFECYCLE_OK, GLACIER_FLAG_META, calc_when_actions_do
+    LIFECYCLE_OK, GLACIER_FLAG_META, calc_when_actions_do, DISABLED_EXPIRATION
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp
 
 
@@ -186,12 +186,14 @@ class ObjectTransitor(Daemon):
 
             if is_success(lifecycle.object.status):
                 object_header = lifecycle.object.headers
-                object_rule = lifecycle.get_object_lifecycle()
+                object_rule = lifecycle.get_object_rule_by_action(
+                    'Transition')
                 last_modified = object_header['Last-Modified']
                 last_modified = gmt_to_timestamp(last_modified)
 
                 validation_flg = lifecycle.object_lifecycle_validation()
-                if validation_flg == LIFECYCLE_OK:
+                if (validation_flg == LIFECYCLE_OK) or \
+                        (validation_flg == DISABLED_EXPIRATION):
                     times = calc_when_actions_do(object_rule, last_modified)
                     actual_expire_time = int(times['Transition'])
                     if actual_expire_time == int(container):
