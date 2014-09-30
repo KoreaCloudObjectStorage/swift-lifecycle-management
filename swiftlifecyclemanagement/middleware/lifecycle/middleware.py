@@ -27,11 +27,11 @@ from utils import xml_to_list, lifecycle_to_xml, get_status_int, \
     updateLifecycleMetadata, check_lifecycle_validation, \
     make_object_metadata_from_rule
 from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
-    CONTAINER_LIFECYCLE_NOT_EXIST, CONTAINER_RULE_DISABLED, \
-    LIFECYCLE_RESPONSE_HEADER, OBJECT_LIFECYCLE_NOT_EXIST, \
-    CONTAINER_LIFECYCLE_IS_UPDATED, LIFECYCLE_ERROR, \
-    CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do, LIFECYCLE_NOT_EXIST,\
-    ContainerLifecycle, ObjectLifecycle
+    CONTAINER_LIFECYCLE_NOT_EXIST, LIFECYCLE_RESPONSE_HEADER,\
+    OBJECT_LIFECYCLE_NOT_EXIST, CONTAINER_LIFECYCLE_IS_UPDATED, \
+    LIFECYCLE_ERROR, CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do,\
+    LIFECYCLE_NOT_EXIST, ContainerLifecycle, ObjectLifecycle, \
+    OBJECT_LIFECYCLE_META, DISABLED_BOTH, DISABLED_EXPIRATION
 
 
 def get_err_response(err):
@@ -110,33 +110,41 @@ class ObjectController(WSGIContext):
             # Setting Object's Lifecycle to empty
             req = Request(copy(env))
             req.method = 'POST'
-            req.headers = headers
+            for h in copy(headers):
+                if not is_user_meta('object', h):
+                    del headers[h]
+                if h.startswith(OBJECT_LIFECYCLE_META['Expiration']) or \
+                   h.startswith(OBJECT_LIFECYCLE_META['Transition']):
+                    del headers[h]
+            req.headers.update(headers)
             req.get_response(self.app)
 
         elif obj_lc_status in (OBJECT_LIFECYCLE_NOT_EXIST,
                                CONTAINER_LIFECYCLE_IS_UPDATED):
             # Make new object metadata
-            object_rule = lifecycle.container.get_rule_by_object_name(
+            object_rules = lifecycle.container.get_rules_by_object_name(
                 self.object)
-            new_header = make_object_metadata_from_rule(object_rule)
-            actionList = calc_when_actions_do(object_rule, last_modified)
+            new_header = dict()
+            for rule in object_rules:
+                h = make_object_metadata_from_rule(rule)
+                new_header.update(h)
+                actionList = calc_when_actions_do(rule, last_modified)
 
+                #Update Hidden Information
+                for key in actionList:
+                    self.hidden_update(hidden={
+                        'account': self.hidden_accounts[key.lower()],
+                        'container': actionList[key]
+                    }, orig={
+                        'account': self.account,
+                        'container': self.container,
+                        'object': self.object
+                    })
             # Update object meta to container LC
             req = Request(copy(env))
             req.method = 'POST'
             req.headers.update(new_header)
             req.get_response(self.app)
-
-            #Update Hidden Information
-            for key in actionList:
-                self.hidden_update(hidden={
-                    'account': self.hidden_accounts[key.lower()],
-                    'container': actionList[key]
-                }, orig={
-                    'account': self.account,
-                    'container': self.container,
-                    'object': self.object
-                })
         elif obj_lc_status == LIFECYCLE_ERROR:
             return Response(status=HTTP_NOT_FOUND)
 
@@ -145,12 +153,12 @@ class ObjectController(WSGIContext):
 
         if obj_lc_status in (LIFECYCLE_NOT_EXIST,
                              CONTAINER_LIFECYCLE_NOT_EXIST,
-                             CONTAINER_RULE_DISABLED):
+                             DISABLED_EXPIRATION, DISABLED_BOTH):
             return resp
 
         lifecycle.reload()
-        object_lifecycle = lifecycle.get_object_lifecycle()
-        if 'Expiration' in object_lifecycle:
+        object_lifecycle = lifecycle.get_object_rule_by_action('Expiration')
+        if object_lifecycle:
             actions = calc_when_actions_do(object_lifecycle, last_modified)
             expire_at = actions['Expiration']
             expire_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT",
@@ -200,29 +208,29 @@ class ObjectController(WSGIContext):
         if not lifecycle:
             return self.app
 
-        rule = container_lc.get_rule_by_object_name(self.object)
+        rules = container_lc.get_rules_by_object_name(self.object)
+        rule_header = dict()
 
-        if rule['Status'].lower() == 'disabled':
-            return self.app
+        for rule in rules:
+            headers = make_object_metadata_from_rule(rule)
+            rule_header.update(headers)
 
-        headers = make_object_metadata_from_rule(rule)
-        actionList = calc_when_actions_do(rule, time.time())
-
-        if actionList:
-            for action, at_time in actionList.iteritems():
-                hidden_account = self.hidden_accounts[action.lower()]
-                action_at = at_time
-                self.hidden_update(hidden=dict({
-                    'account': hidden_account,
-                    'container': action_at
-                }), orig=dict({
-                    'account': self.account,
-                    'container': self.container,
-                    'object': self.object
-                }))
+            actionList = calc_when_actions_do(rule, time.time())
+            if actionList:
+                for action, at_time in actionList.iteritems():
+                    hidden_account = self.hidden_accounts[action.lower()]
+                    action_at = at_time
+                    self.hidden_update(hidden=dict({
+                        'account': hidden_account,
+                        'container': action_at
+                    }), orig=dict({
+                        'account': self.account,
+                        'container': self.container,
+                        'object': self.object
+                    }))
 
         req = Request(env)
-        req.headers.update(headers)
+        req.headers.update(rule_header)
         return req.get_response(self.app)
 
     def hidden_update(self, hidden, orig, method='PUT'):
@@ -491,7 +499,7 @@ class LifecycleManageController(WSGIContext):
             self.update_hidden_s3_account(self.account, self.container)
         except LifecycleConfigException as e:
             return get_err_response(e.message)
-        except Exception:
+        except Exception as e:
             msg = dict()
             msg['status'] = 400
             msg['code'] = 'MalformedXML'

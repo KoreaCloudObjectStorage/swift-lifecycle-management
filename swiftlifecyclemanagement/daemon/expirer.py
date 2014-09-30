@@ -15,7 +15,7 @@ from swift.common.utils import get_logger, dump_recon_cache
 from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT
 
 from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
-    LIFECYCLE_OK, calc_when_actions_do
+    LIFECYCLE_OK, calc_when_actions_do, DISABLED_TRANSITION
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp, \
     get_objects_by_prefix, get_glacier_objname_from_hidden_object, \
     get_glacier_key_from_hidden_object
@@ -194,11 +194,12 @@ class ObjectExpirer(Daemon):
             lifecycle = Lifecycle(account, container, object,
                                   swift_client=self.swift)
             object_header = lifecycle.object.headers
-            object_rule = lifecycle.get_object_lifecycle()
+            object_rule = lifecycle.get_object_rule_by_action('Expiration')
             last_modified = gmt_to_timestamp(object_header['Last-Modified'])
 
             validation_flg = lifecycle.object_lifecycle_validation()
-            if validation_flg == LIFECYCLE_OK:
+            if (validation_flg == LIFECYCLE_OK) or \
+                    (validation_flg == DISABLED_TRANSITION):
                 times = calc_when_actions_do(object_rule, last_modified)
                 actual_expire_time = int(times['Expiration'])
                 if actual_expire_time == int(hidden_container):

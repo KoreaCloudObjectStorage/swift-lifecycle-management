@@ -10,6 +10,7 @@ from eventlet.greenpool import GreenPool
 from swift import gettext_ as _
 from swift.common.daemon import Daemon
 from swift.common.internal_client import InternalClient
+from swift.common.request_helpers import is_user_meta
 from swift.common.utils import get_logger, dump_recon_cache, \
     normalize_timestamp
 from swift.common.bufferedhttp import http_connect
@@ -213,8 +214,12 @@ class LifecyclePropagator(Daemon):
                 continue
 
             metadata = make_object_metadata_from_rule(rule)
+            lc.object.headers.update(metadata)
+            for h in lc.object.headers.copy():
+                if not is_user_meta('object', h):
+                    del lc.object.headers[h]
             is_updated = self.update_object_metadata(account, container,
-                                                     o, metadata)
+                                                     o, lc.object.headers)
             # Object Metadata update가 안되었으면, rule이 propagated 안된 것으로 처리
             if not is_success(is_updated):
                 propagated = False
