@@ -109,6 +109,8 @@ def parseAction(action_name, rule):
             hhmmss_format.append('00:00:00.00')
             hhmmss_format.append('00:00:00.0')
             hhmmss_format.append('00:00:00')
+            hhmmss_format.append('00:00:000')
+            hhmmss_format.append('00:00:000Z')
 
             if hhmmss not in hhmmss_format:
                 raise
