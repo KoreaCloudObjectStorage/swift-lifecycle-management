@@ -60,14 +60,14 @@ def xml_to_list(xml):
 
             actions = calc_when_actions_do(ruledata, time.time())
             if actions['Transition'] >= actions['Expiration']:
-                type = 'Days' if 'Days' in ruledata['Expiration'] else 'Date'
+                type, compare = ('Days', 'greater') if 'Days' in ruledata['Expiration'] else ('Date', 'later')
                 exceptionMsg = dict()
                 exceptionMsg['status'] = 400
                 exceptionMsg['code'] = 'InvalidRequest'
                 exceptionMsg['msg'] = "'%s' in the Expiration action for " \
-                                      "prefix '%s' must be greater than '%s'" \
+                                      "prefix '%s' must be %s than '%s'" \
                                       " in the Transition action" \
-                                      % (type, ruledata['Prefix'], type)
+                                      % (type, ruledata['Prefix'], compare, type)
                 raise LifecycleConfigException(exceptionMsg)
 
         rulelist.append(ruledata)
@@ -231,6 +231,7 @@ def check_lifecycle_validation(rulelist):
         base_action['Prefix'] = base['Prefix']
         comp_action['Prefix'] = comp['Prefix']
         day_type = ({'Days', 'Date'} - day_type).pop()
+        day_compare = 'greater' if day_type == 'Days' else 'later'
         exp_time = None
         tr_time = None
 
@@ -247,10 +248,10 @@ def check_lifecycle_validation(rulelist):
                 exceptionMsg['status'] = 400
                 exceptionMsg['code'] = 'InvalidRequest'
                 exceptionMsg['msg'] = "'%s' in the Expiration action for " \
-                                      "prefix '%s' must be greater than '%s'" \
+                                      "prefix '%s' must be %s than '%s'" \
                                       " in the Transition action for prefix " \
                                       "'%s'" \
-                                      % (day_type, exp_time[0], day_type,
+                                      % (day_type, exp_time[0], day_compare, day_type,
                                          tr_time[0])
                 raise LifecycleConfigException(exceptionMsg)
 
@@ -297,7 +298,7 @@ def get_status_int(status):
 
 def is_lifecycle_in_header(headers):
     if CONTAINER_LIFECYCLE_SYSMETA in headers and \
-       headers[CONTAINER_LIFECYCLE_SYSMETA] != 'None':
+                    headers[CONTAINER_LIFECYCLE_SYSMETA] != 'None':
         return True
     return False
 
@@ -309,9 +310,9 @@ def make_object_metadata_from_rule(rule):
         if key not in rule:
             continue
         meta_prefix = OBJECT_LIFECYCLE_META[key]
-        headers[meta_prefix+'Rule-Id'] = rule['ID']
+        headers[meta_prefix + 'Rule-Id'] = rule['ID']
         action = rule[key]
-        headers[meta_prefix+'Last-Modified'] = action['LastModified']
+        headers[meta_prefix + 'Last-Modified'] = action['LastModified']
 
     return headers
 
