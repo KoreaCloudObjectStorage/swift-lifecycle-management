@@ -27,9 +27,9 @@ from utils import xml_to_list, lifecycle_to_xml, get_status_int, \
     updateLifecycleMetadata, check_lifecycle_validation, \
     make_object_metadata_from_rule
 from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
-    CONTAINER_LIFECYCLE_NOT_EXIST, LIFECYCLE_RESPONSE_HEADER,\
+    CONTAINER_LIFECYCLE_NOT_EXIST, LIFECYCLE_RESPONSE_HEADER, \
     OBJECT_LIFECYCLE_NOT_EXIST, CONTAINER_LIFECYCLE_IS_UPDATED, \
-    LIFECYCLE_ERROR, CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do,\
+    LIFECYCLE_ERROR, CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do, \
     LIFECYCLE_NOT_EXIST, ContainerLifecycle, ObjectLifecycle, \
     OBJECT_LIFECYCLE_META, DISABLED_BOTH, DISABLED_EXPIRATION
 
@@ -44,9 +44,13 @@ def get_err_response(err):
 
     resp = Response(content_type='text/xml')
     resp.status = err['status']
+    xml_code = '' if 'code' not in err else '<Code>%s</Code>' % err['code']
+    xml_msg = '' if 'msg' not in err else '<Message>%s</Message>' % err['msg']
+    xml_arg_value = '' if 'arg_value' not in err else '<ArgumentValue>%s</ArgumentValue>' % err['arg_value']
+    xml_arg_name = '' if 'arg_name' not in err else '<ArgumentName>%s</ArgumentName>' % err['arg_name']
     resp.body = """<?xml version="1.0" encoding="UTF-8"?>
-                   <Error><Code>%s</Code><Message>%s</Message></Error>""" \
-                % (err['code'], err['msg'])
+                   <Error>%s%s%s%s</Error>""" \
+                % (xml_code, xml_msg, xml_arg_value, xml_arg_name)
     resp.headers = {LIFECYCLE_RESPONSE_HEADER: True}
     return resp
 
@@ -103,7 +107,6 @@ class ObjectController(WSGIContext):
 
             return resp
 
-
         obj_lc_status = lifecycle.object_lifecycle_validation()
 
         if obj_lc_status == CONTAINER_LIFECYCLE_NOT_EXIST:
@@ -114,7 +117,7 @@ class ObjectController(WSGIContext):
                 if not is_user_meta('object', h):
                     del headers[h]
                 if h.startswith(OBJECT_LIFECYCLE_META['Expiration']) or \
-                   h.startswith(OBJECT_LIFECYCLE_META['Transition']):
+                        h.startswith(OBJECT_LIFECYCLE_META['Transition']):
                     del headers[h]
             req.headers.update(headers)
             req.get_response(self.app)
@@ -140,7 +143,7 @@ class ObjectController(WSGIContext):
                         'container': self.container,
                         'object': self.object
                     })
-            # Update object meta to container LC
+                # Update object meta to container LC
             req = Request(copy(env))
             req.method = 'POST'
             req.headers.update(new_header)

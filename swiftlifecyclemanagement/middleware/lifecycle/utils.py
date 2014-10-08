@@ -157,37 +157,33 @@ def updateLifecycleMetadata(prevLifecycle, currLifecycle):
 
 
 def check_lifecycle_validation(rulelist):
-    """
-    [Reference]
-    http://stackoverflow.com/questions/72899/how-do-i-sort-a-list-of-
-    dictionaries-by-values-of-the-dictionary-in-python
-    """
-    # Prefix를 알파벳 순서대로 정렬
-    sortedList = sorted(rulelist, key=lambda k: k['Prefix'])
-    length = len(sortedList)
+    length = len(rulelist)
 
     if length > 1000:
         raise Exception
 
+    for i in range(length - 1):
+        baseId = rulelist[i]['ID']
+        for j in range(i + 1, length):
+            compareId = rulelist[j]['ID']
+
+            if baseId == compareId:
+                exceptionMsg = dict()
+                exceptionMsg['status'] = 400
+                exceptionMsg['code'] = 'InvalidArgument'
+                exceptionMsg['msg'] = 'Rule ID must be unique. ' \
+                                      'Found same ID for more than one rule'
+                exceptionMsg['arg_value'] = baseId
+                exceptionMsg['arg_name'] = 'ID'
+                raise LifecycleConfigException(exceptionMsg)
+
+    # Prefix를 알파벳 순서대로 정렬
+    # http://stackoverflow.com/questions/72899/how-do-i-sort-a-list-of-dictionaries-by-values-of-the-dictionary-in-python
+    sortedList = sorted(rulelist, key=lambda k: k['Prefix'])
+
     for base, comp in _iter_list_to_compare(sortedList):
         basePrefix = base['Prefix']
-        baseId = base['ID']
-
         comparePrefix = comp['Prefix']
-        compareId = comp['ID']
-
-        if baseId == compareId:
-            exceptionMsg = dict()
-            exceptionMsg['status'] = 400
-            exceptionMsg['code'] = 'InvalidRequest'
-            message = '<?xml version="1.0" encoding="UTF-8"?>' \
-                      '<Error><Code>InvalidArgument</Code>' \
-                      '<Message>Rule ID must be unique. ' \
-                      'Found same ID for more than one rule</Message>' \
-                      '<ArgumentValue>%s</ArgumentValue>' \
-                      '<ArgumentName>ID</ArgumentName>' % baseId
-            exceptionMsg['msg'] = message
-            raise LifecycleConfigException(exceptionMsg)
 
         if basePrefix == comparePrefix:
             exceptionMsg = dict()
