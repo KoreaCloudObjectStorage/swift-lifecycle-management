@@ -101,6 +101,18 @@ def parseAction(action_name, rule):
                 exceptionMsg['msg'] = "'Date' must be at midnight GMT'"
                 raise LifecycleConfigException(exceptionMsg)
 
+            hhmmss = actiondic['Date'].split('T', 1)[1]
+
+            hhmmss_format = list()
+            hhmmss_format.append('00:00:00.000Z')
+            hhmmss_format.append('00:00:00.000')
+            hhmmss_format.append('00:00:00.00')
+            hhmmss_format.append('00:00:00.0')
+            hhmmss_format.append('00:00:00')
+
+            if hhmmss not in hhmmss_format:
+                raise
+
     if action_name == "Transition":
         actiondic['StorageClass'] = action.find("StorageClass").text
         if actiondic['StorageClass'] != 'GLACIER':
