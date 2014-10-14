@@ -17,7 +17,7 @@ setup(
     license='',
     author='nexusz99',
     author_email='nexusz99@a2company.co.kr',
-    description='Swift Lifecycle Manamgment Middleware',
+    description='Swift Lifecycle Management Middleware',
     install_requires=['swift >= 1.13.1', 'boto >= 2.32.1',
                       'python-dateutil >= 2.2'],
     entry_points={'paste.filter_factory': filter_factory}
