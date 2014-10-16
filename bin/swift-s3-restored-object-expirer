@@ -17,3 +17,4 @@ if __name__ == '__main__':
                       "process should do")
     conf_file, options = parse_options(parser=parser, once=True)
     run_daemon(RestoredObjectExpirer, conf_file, **options)
+

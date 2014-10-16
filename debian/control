@@ -10,6 +10,71 @@ Standards-Version: 3.9.1
 
 Package: python-swiftlifecyclemanagement
 Architecture: all
-Depends: ${misc:Depends}, ${python:Depends}
-Description: Swift Lifecycle Management Middleware
+Depends:
+ ${misc:Depends},
+ ${python:Depends}
+Provides: ${python:Provides}
+Breaks: swift (<< 1.13.1~rc1-0ubuntu1~)
+Replaces: swift (<< 1.13.1~rc1-0ubuntu1~)
+Description: Swift S3 Lifecycle Management Middleware
+
+Package: swift-s3-lifecycle-propagator
+Architecture: all
+Depends:
+ python-swiftlifecyclemanagement (=${binary:Version}),
+ ${misc:Depends},
+ ${python:Depends},
+ ${shlibs:Depends}
+Provides: ${python:Provides}
+Breaks: swift (<< 1.13.1~rc1-0ubuntu1~)
+Replaces: swift (<< 1.13.1~rc1-0ubuntu1~)
+Description: Swift S3 Lifecycle Propagator
+
+Package: swift-s3-object-expirer
+Architecture: all
+Depends:
+ python-swiftlifecyclemanagement (=${binary:Version}),
+ ${misc:Depends},
+ ${python:Depends},
+ ${shlibs:Depends}
+Provides: ${python:Provides}
+Breaks: swift (<< 1.13.1~rc1-0ubuntu1~)
+Replaces: swift (<< 1.13.1~rc1-0ubuntu1~)
+Description: Swift S3 Lifecycle Object Expirer
+
+Package: swift-s3-object-transitor
+Architecture: all
+Depends:
+ python-swiftlifecyclemanagement (=${binary:Version}),
+ ${misc:Depends},
+ ${python:Depends},
+ ${shlibs:Depends}
+Provides: ${python:Provides}
+Breaks: swift (<< 1.13.1~rc1-0ubuntu1~)
+Replaces: swift (<< 1.13.1~rc1-0ubuntu1~)
+Description: Swift S3 Lifecycle Object Transitor
+
+Package: swift-s3-object-restorer
+Architecture: all
+Depends:
+ python-swiftlifecyclemanagement (=${binary:Version}),
+ ${misc:Depends},
+ ${python:Depends},
+ ${shlibs:Depends}
+Provides: ${python:Provides}
+Breaks: swift (<< 1.13.1~rc1-0ubuntu1~)
+Replaces: swift (<< 1.13.1~rc1-0ubuntu1~)
+Description: Swift S3 Lifecycle Object Restorer
+
+Package: swift-s3-restored-object-expirer
+Architecture: all
+Depends:
+ python-swiftlifecyclemanagement (=${binary:Version}),
+ ${misc:Depends},
+ ${python:Depends},
+ ${shlibs:Depends}
+Provides: ${python:Provides}
+Breaks: swift (<< 1.13.1~rc1-0ubuntu1~)
+Replaces: swift (<< 1.13.1~rc1-0ubuntu1~)
+Description: Swift S3 Lifecycle Restored Object Expirer
 
