@@ -11,6 +11,7 @@ Standards-Version: 3.9.1
 Package: python-swiftlifecyclemanagement
 Architecture: all
 Depends:
+ python-dateutil (>=2.2),
  ${misc:Depends},
  ${python:Depends}
 Provides: ${python:Provides}
