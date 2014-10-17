@@ -76,23 +76,20 @@ class ContainerLifecycle(LifecycleCommon):
     def get_rule_actions_by_object_name(self, prefix):
         rules = self.get_rules_by_object_name(prefix)
 
-        if not rules:
-            return None
-
         rule_info = dict()
         for rule in rules:
             for key in rule:
                 if key in ('Expiration', 'Transition'):
-                    rule_info[key+'-Id'] = rule['ID']
+                    rule_info[key + '-Id'] = rule['ID']
                     rule_info[key] = rule[key]['LastModified']
-                    rule_info[key+'-Status'] = rule['Status']
+                    rule_info[key + '-Status'] = rule['Status']
         return rule_info
 
     def get_rules_by_object_name(self, obj_name):
         lifecycle = self.get_lifecycle()
 
         if not lifecycle:
-            return None
+            return []
 
         sortedlist = sorted(lifecycle, key=lambda k: k['Prefix'])
         prefixMap = map(itemgetter('Prefix'), sortedlist)
@@ -100,7 +97,7 @@ class ContainerLifecycle(LifecycleCommon):
         for p in prefixMap:
             if p > obj_name:
                 break
-                
+
             # The maximum number of rules for object are two,
             # so if rules length is 2, escape for loop.
             if len(rules) == 2:
@@ -154,8 +151,8 @@ class ObjectLifecycle(LifecycleCommon):
 
             action = meta_prefix.split('-', 5)[4]
             lifecycle['%s-Id' % action] = rule_id
-            lifecycle[action] = self.headers[meta_prefix+'Last-Modified']
-            lifecycle[action+'-Status'] = 'Enabled'
+            lifecycle[action] = self.headers[meta_prefix + 'Last-Modified']
+            lifecycle[action + '-Status'] = 'Enabled'
 
         if len(lifecycle) == 0:
             return None
@@ -192,9 +189,11 @@ class Lifecycle(object):
 
     def get_object_rule_by_action(self, action):
         rules = self.container.get_rules_by_object_name(self.obj)
+
         for rule in rules:
             if action in rule:
                 return rule
+
         return None
 
     def object_lifecycle_validation(self):
@@ -213,14 +212,14 @@ class Lifecycle(object):
 
                 for key in ('Expiration', 'Transition'):
                     if (key not in c_rule and key in o_rule) or \
-                       (key in c_rule and key not in o_rule):
+                            (key in c_rule and key not in o_rule):
                         return CONTAINER_LIFECYCLE_IS_UPDATED
 
                     elif key not in c_rule and key not in o_rule:
                         continue
 
                     if c_rule[key] == o_rule[key]:
-                        if c_rule[key+'-Status'].lower() == 'disabled':
+                        if c_rule[key + '-Status'].lower() == 'disabled':
                             if rule_status:
                                 rule_status = DISABLED_BOTH
                                 break
@@ -257,7 +256,7 @@ def calc_when_actions_do(rule, from_time):
         time = None
         if 'Date' in action:
             time = calendar.timegm(dateutil.parser.parse(action['Date'])
-                                   .timetuple())
+            .timetuple())
         elif 'Days' in action:
             time = calc_nextDay(from_time) + int(action['Days']) * DAY_SECONDS
             time = normalize_delete_at_timestamp(time)

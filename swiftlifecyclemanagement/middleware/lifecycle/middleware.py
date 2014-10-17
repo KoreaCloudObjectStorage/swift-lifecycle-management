@@ -143,7 +143,8 @@ class ObjectController(WSGIContext):
                         'container': self.container,
                         'object': self.object
                     })
-                # Update object meta to container LC
+
+            # Update object meta to container LC
             req = Request(copy(env))
             req.method = 'POST'
             req.headers.update(new_header)
