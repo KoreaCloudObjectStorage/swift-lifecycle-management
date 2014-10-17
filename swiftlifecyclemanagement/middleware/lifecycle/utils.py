@@ -176,8 +176,29 @@ def check_lifecycle_validation(rulelist):
     if length > 1000:
         raise Exception
 
-    for i in range(length - 1):
+    for i in range(length):
         baseId = rulelist[i]['ID']
+
+        if len(baseId) > 255:
+            exceptionMsg = dict()
+            exceptionMsg['status'] = 400
+            exceptionMsg['code'] = 'InvalidArgument'
+            exceptionMsg['msg'] = 'ID length should not exceed allowed limit of 255'
+            exceptionMsg['arg_value'] = baseId
+            exceptionMsg['arg_name'] = 'ID'
+            raise LifecycleConfigException(exceptionMsg)
+
+        rule_prefix = rulelist[i]['Prefix']
+
+        if len(rule_prefix) > 1024:
+            exceptionMsg = dict()
+            exceptionMsg['status'] = 400
+            exceptionMsg['code'] = 'InvalidArgument'
+            exceptionMsg['msg'] = 'Specified prefix is longer than maximum allowed key length of 1024'
+            exceptionMsg['arg_value'] = rule_prefix
+            exceptionMsg['arg_name'] = 'Prefix'
+            raise LifecycleConfigException(exceptionMsg)
+
         for j in range(i + 1, length):
             compareId = rulelist[j]['ID']
 
