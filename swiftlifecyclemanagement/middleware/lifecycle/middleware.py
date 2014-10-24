@@ -567,6 +567,38 @@ class LifecycleMiddleware(object):
 
     def __call__(self, env, start_response):
         req = Request(env)
+
+        if 'AWSAccessKeyId' in req.params:
+            try:
+                req.headers['Date'] = req.params['Expires']
+                req.headers['Authorization'] = \
+                    'AWS %(AWSAccessKeyId)s:%(Signature)s' % req.params
+            except KeyError:
+                return get_err_response({'status': 400,
+                                         'code': 'InvalidArgument',
+                                         'msg': 'InvalidArgument'})
+
+        if 'Authorization' not in req.headers:
+            return self.app(env, start_response)
+
+        try:
+            keyword, info = req.headers['Authorization'].split(' ')
+        except:
+            return get_err_response({'status': 403,
+                                     'code': 'AccessDenied',
+                                     'msg': 'AccessDenied'})
+
+        if keyword != 'AWS':
+            return get_err_response({'status': 403,
+                                     'code': 'AccessDenied',
+                                     'msg': 'AccessDenied'})
+        try:
+            account, signature = info.rsplit(':', 1)
+        except:
+            return get_err_response({'status': 400,
+                                     'code': 'InvalidArgument',
+                                     'msg': 'InvalidArgument'})
+
         self.logger.debug('Calling Lifecycle Middleware')
 
         controller, path_parts = self.get_controller(env, req.path)
