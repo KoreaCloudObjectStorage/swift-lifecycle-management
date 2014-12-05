@@ -76,7 +76,7 @@ class ObjectRestorer(Daemon):
         self.process = int(self.conf.get('process', 0))
 
     def _init_glacier(self):
-        con = Layer2()
+        con = Layer2(region_name='ap-northeast-1')
         return con.get_vault('swift-s3-transition')
 
     def report(self, final=False):
