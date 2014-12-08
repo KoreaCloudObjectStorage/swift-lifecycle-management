@@ -28,7 +28,7 @@ class TransitionMiddleware(object):
 
     def _init_glacier(self):
         con = Layer2(region_name='ap-northeast-1')
-        return con.get_vault('swift-s3-transition')
+        return con.create_vault('swift-s3-transition')
 
     def transition(self, env):
         # GET Object body
