@@ -104,6 +104,7 @@ class ObjectController(WSGIContext):
                 resp.content_length = headers[
                     'X-Object-Meta-S3-Content-Length']
                 resp.etag = headers['X-Object-Meta-S3-ETag']
+                resp.status = HTTP_OK
 
             return resp
 
