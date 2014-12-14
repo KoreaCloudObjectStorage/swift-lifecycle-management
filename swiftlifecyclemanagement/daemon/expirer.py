@@ -26,6 +26,7 @@ class ObjectExpirer(Daemon):
         super(ObjectExpirer, self).__init__(conf)
         self.conf = conf
         self.logger = get_logger(conf, log_route='s3-object-expirer')
+        self.logger.set_statsd_prefix('s3-object-expirer')
         self.interval = int(conf.get('interval') or 300)
         self.s3_expiring_objects_account = \
             (conf.get('auto_create_account_prefix') or '.') + \

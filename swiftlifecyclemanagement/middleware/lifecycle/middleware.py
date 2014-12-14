@@ -56,7 +56,7 @@ def get_err_response(err):
 
 
 class ObjectController(WSGIContext):
-    def __init__(self, app, account, container_name, object_name, **kwargs):
+    def __init__(self, app, logger, account, container_name, object_name):
         WSGIContext.__init__(self, app)
         self.account = account
         self.container = container_name
@@ -64,6 +64,7 @@ class ObjectController(WSGIContext):
         self.hidden_accounts = {'expiration': '.s3_expiring_objects',
                                 'transition': '.s3_transitioning_objects'}
         self.container_ring = Ring('/etc/swift', ring_name='container')
+        self.logger = logger
 
     def GETorHEAD(self, env, start_response):
         lifecycle = Lifecycle(self.account, self.container, self.object,
@@ -361,12 +362,13 @@ class ObjectController(WSGIContext):
 
 
 class LifecycleManageController(WSGIContext):
-    def __init__(self, app, account, container_name, **kwargs):
+    def __init__(self, app, logger, account, container_name, **kwargs):
         WSGIContext.__init__(self, app)
         self.s3_accounts = '.s3_accounts'
         self.container_ring = Ring('/etc/swift', ring_name='container')
         self.account = account
         self.container = container_name
+        self.logger = logger
 
     def GET(self, env, start_response):
         container_lc = ContainerLifecycle(self.account, self.container,
@@ -427,6 +429,9 @@ class LifecycleManageController(WSGIContext):
             req.method = 'POST'
             req.headers[CONTAINER_LIFECYCLE_SYSMETA] = 'None'
             req.get_response(self.app)
+            self.logger.increment('%s.%s.lifecycle.delete' % (self.account,
+                                                              self.container))
+
         elif 'lifecycle_rule' in req.params:
             rule_id = req.params['lifecycle_rule']
             filtered_lc = filter(lambda x: x.get('ID') != rule_id, lifecycle)
@@ -438,6 +443,8 @@ class LifecycleManageController(WSGIContext):
             req.method = 'POST'
             req.headers[CONTAINER_LIFECYCLE_SYSMETA] = filtered_lc
             req.get_response(self.app)
+            self.logger.increment('%s.%s.lifecycle_rule.delete' %
+                                  (self.account, self.container))
 
         return Response(status=HTTP_NO_CONTENT)
 
@@ -485,9 +492,13 @@ class LifecycleManageController(WSGIContext):
                 updateLifecycleMetadata(prevLifecycle, lifecycle)
                 prevLifecycle.append(lifecycle[0])
                 lifecycle = prevLifecycle
+                self.logger.increment('%s.%s.lifecycle_rule.put' % (
+                    self.account, self.container))
 
             if 'lifecycle' in req.params:
                 updateLifecycleMetadata(prevLifecycle, lifecycle)
+                self.logger.increment('%s.%s.lifecycle.put' % (
+                    self.account, self.container))
 
             check_lifecycle_validation(lifecycle)
 
@@ -549,6 +560,7 @@ class LifecycleMiddleware(object):
         self.app = app
         self.conf = conf
         self.logger = get_logger(self.conf, log_route='lifecycle')
+        self.logger.set_statsd_prefix('lifecycle-middleware')
 
     def get_controller(self, env, path):
         req = Request(env)
@@ -606,7 +618,7 @@ class LifecycleMiddleware(object):
 
         if controller is None:
             return self.app(env, start_response)
-        controller = controller(self.app, **path_parts)
+        controller = controller(self.app, self.logger, **path_parts)
 
         if hasattr(controller, req.method):
             res = getattr(controller, req.method)(env, start_response)
