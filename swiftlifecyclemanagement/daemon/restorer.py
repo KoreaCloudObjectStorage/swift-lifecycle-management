@@ -293,8 +293,8 @@ class ObjectRestorer(Daemon):
             exp_date = strftime("%a, %d %b %Y %H:%M:%S GMT",
                                 gmtime(float(exp_time)))
 
-            metadata['X-Object-Meta-s3-restore'] = 'ongoing-request="false" ' \
-                                                   'expiry-date=%s' % exp_date
+            metadata['X-Object-Meta-s3-restore'] = 'ongoing-request="false", ' \
+                                                   'expiry-date="%s"' % exp_date
             metadata['Content-Length'] = os.path.getsize(tmppath)
             del metadata['X-Object-Meta-s3-restore-expire-days']
 
