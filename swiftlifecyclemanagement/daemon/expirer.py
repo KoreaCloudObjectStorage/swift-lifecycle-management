@@ -103,8 +103,8 @@ class ObjectExpirer(Daemon):
                                                 s3_expiring_objects_account):
                 container = c['name']
                 timestamp = int(container)
-                #if timestamp > int(time()):
-                #    break
+                if timestamp > int(time()):
+                    break
                 containers_to_delete.append(container)
                 for o in self.swift.iter_objects(self
                                                  .s3_expiring_objects_account,
