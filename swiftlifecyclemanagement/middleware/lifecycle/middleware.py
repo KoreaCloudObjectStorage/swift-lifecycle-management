@@ -429,8 +429,6 @@ class LifecycleManageController(WSGIContext):
             req.method = 'POST'
             req.headers[CONTAINER_LIFECYCLE_SYSMETA] = 'None'
             req.get_response(self.app)
-            self.logger.increment('%s.%s.lifecycle.delete' % (self.account,
-                                                              self.container))
 
         elif 'lifecycle_rule' in req.params:
             rule_id = req.params['lifecycle_rule']
@@ -443,8 +441,9 @@ class LifecycleManageController(WSGIContext):
             req.method = 'POST'
             req.headers[CONTAINER_LIFECYCLE_SYSMETA] = filtered_lc
             req.get_response(self.app)
-            self.logger.increment('%s.%s.lifecycle_rule.delete' %
-                                  (self.account, self.container))
+
+        self.logger.increment('%s.%s.lifecycle.delete' % (self.account,
+                                                          self.container))
 
         return Response(status=HTTP_NO_CONTENT)
 
@@ -492,13 +491,9 @@ class LifecycleManageController(WSGIContext):
                 updateLifecycleMetadata(prevLifecycle, lifecycle)
                 prevLifecycle.append(lifecycle[0])
                 lifecycle = prevLifecycle
-                self.logger.increment('%s.%s.lifecycle_rule.put' % (
-                    self.account, self.container))
 
             if 'lifecycle' in req.params:
                 updateLifecycleMetadata(prevLifecycle, lifecycle)
-                self.logger.increment('%s.%s.lifecycle.put' % (
-                    self.account, self.container))
 
             check_lifecycle_validation(lifecycle)
 
@@ -513,6 +508,9 @@ class LifecycleManageController(WSGIContext):
                 return resp
 
             self.update_hidden_s3_account(self.account, self.container)
+
+            self.logger.increment('%s.%s.lifecycle.put' %
+                                  (self.account, self.container))
         except LifecycleConfigException as e:
             return get_err_response(e.message)
         except Exception as e:

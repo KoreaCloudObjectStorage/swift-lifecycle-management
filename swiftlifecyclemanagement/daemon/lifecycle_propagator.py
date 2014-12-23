@@ -33,6 +33,7 @@ class LifecyclePropagator(Daemon):
         super(LifecyclePropagator, self).__init__(conf)
         self.conf = conf
         self.logger = get_logger(conf, log_route='lifecycle-propagator')
+        self.logger.set_statsd_prefix('s3-lifecycle-propagator')
         self.interval = int(conf.get('interval') or 300)
         self.s3_accounts = '.s3_accounts'
         self.container_ring = Ring('/etc/swift', ring_name='container')
@@ -157,6 +158,8 @@ class LifecyclePropagator(Daemon):
         self.swift.make_request('POST', cpath, {CONTAINER_LIFECYCLE_SYSMETA:
                                 lifecycle}, (2,))
 
+        self.logger.increment('containers')
+
     def get_process_values(self, kwargs):
         """
         Gets the processes, process from the kwargs if those values exist.
@@ -237,6 +240,8 @@ class LifecyclePropagator(Daemon):
                     'container': container,
                     'object': o
                 })
+
+            self.logger.increment('objects')
         return propagated
 
     def get_not_propagated_rules(self, lifecycle):
