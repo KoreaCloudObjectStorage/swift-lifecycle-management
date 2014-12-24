@@ -282,7 +282,8 @@ class ObjectController(WSGIContext):
 
         archive_id = get_glacier_key_from_hidden_object(glacier_obj)
         try:
-            vault = Layer2().get_vault('swift-s3-transition')
+            region = 'ap-northeast-1'
+            vault = Layer2(region_name=region).get_vault('swift-s3-transition')
             vault.delete_archive(archive_id)
             self.hidden_update(
                 hidden={'account': '.glacier_' + self.account,
