@@ -24,7 +24,7 @@ from eventlet.greenpool import GreenPool
 
 from swift import gettext_ as _
 from swift.common.daemon import Daemon
-from swift.common.internal_client import InternalClient
+from swift.common.internal_client import InternalClient, UnexpectedResponse
 from swift.common.utils import get_logger, dump_recon_cache
 from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT, \
     HTTP_PRECONDITION_FAILED
@@ -218,8 +218,12 @@ class RestoredObjectExpirer(Daemon):
         """
         path = '/v1/' + urllib.quote(actual_obj.lstrip('/'))
         account, container, object = actual_obj.split('/', 2)
-        metadata = self.swift.get_object_metadata(account, container, object,
-                                                  'X-Object-Meta')
+        try:
+            metadata = self.swift.get_object_metadata(account, container, object,
+                                                      'X-Object-Meta')
+        except UnexpectedResponse as e:
+            if e.resp.status_int == 404:
+                return
         metadata = {'X-Object-Meta' + key: value for key, value in metadata
         .iteritems()}
         del metadata['X-Object-Meta-s3-restore']

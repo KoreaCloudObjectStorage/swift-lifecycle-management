@@ -209,6 +209,12 @@ class ObjectRestorer(Daemon):
             actual_obj = obj
             account, container, obj = actual_obj.split('/', 2)
             archiveId = self.get_archiveid(account, container, obj)
+
+            if archiveId is None:
+                self.swift.delete_object(self.restoring_object_account,
+                                         self.todo_container, actual_obj)
+                return
+
             jobId = self.glacier.retrieve_archive(archiveId).id
             restoring_obj = make_glacier_hidden_object_name(actual_obj, jobId)
 

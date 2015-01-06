@@ -1,11 +1,11 @@
-# coding=utf-8
+# -*- coding: utf-8 -*-
 import dateutil.parser
 import xml.etree.ElementTree as ET
 import time
 from copy import copy
 
-from swiftlifecyclemanagement.common.lifecycle import \
-    CONTAINER_LIFECYCLE_SYSMETA, OBJECT_LIFECYCLE_META, calc_when_actions_do
+from swiftlifecyclemanagement.common.lifecycle import OBJECT_LIFECYCLE_META, \
+    calc_when_actions_do
 from exceptions import LifecycleConfigException
 
 
@@ -172,10 +172,6 @@ def updateLifecycleMetadata(prevLifecycle, currLifecycle):
 
 def check_lifecycle_validation(rulelist):
     length = len(rulelist)
-
-    if length > 1000:
-        raise Exception
-
     for i in range(length):
         baseId = rulelist[i]['ID']
 
@@ -325,13 +321,6 @@ def rule_to_xmlnode(rule, root):
 
 def get_status_int(status):
     return int(status.split(' ', 1)[0])
-
-
-def is_lifecycle_in_header(headers):
-    if CONTAINER_LIFECYCLE_SYSMETA in headers and \
-                    headers[CONTAINER_LIFECYCLE_SYSMETA] != 'None':
-        return True
-    return False
 
 
 def make_object_metadata_from_rule(rule):

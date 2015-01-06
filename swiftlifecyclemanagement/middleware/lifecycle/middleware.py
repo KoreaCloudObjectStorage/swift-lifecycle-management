@@ -1,4 +1,4 @@
-# coding=utf-8
+# -*- coding: utf-8 -*-
 import time
 import xml.etree.ElementTree as ET
 import urlparse
@@ -14,7 +14,7 @@ from swift.common.utils import get_logger, split_path, \
     normalize_timestamp
 from swift.common.wsgi import WSGIContext
 from swift.common.http import HTTP_NO_CONTENT, HTTP_NOT_FOUND, HTTP_OK, \
-    HTTP_FORBIDDEN, HTTP_BAD_REQUEST
+    HTTP_FORBIDDEN, HTTP_BAD_REQUEST, HTTP_CREATED
 from swift.common.ring import Ring
 from swift.common.bufferedhttp import http_connect
 from swift.common.request_helpers import is_user_meta
@@ -23,13 +23,13 @@ from exceptions import LifecycleConfigException
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp, \
     get_objects_by_prefix, get_glacier_key_from_hidden_object, \
     get_glacier_objname_from_hidden_object
-from utils import xml_to_list, lifecycle_to_xml, get_status_int, \
+from utils import xml_to_list, lifecycle_to_xml, \
     updateLifecycleMetadata, check_lifecycle_validation, \
     make_object_metadata_from_rule
 from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
     CONTAINER_LIFECYCLE_NOT_EXIST, LIFECYCLE_RESPONSE_HEADER, \
     OBJECT_LIFECYCLE_NOT_EXIST, CONTAINER_LIFECYCLE_IS_UPDATED, \
-    LIFECYCLE_ERROR, CONTAINER_LIFECYCLE_SYSMETA, calc_when_actions_do, \
+    LIFECYCLE_ERROR, calc_when_actions_do, \
     LIFECYCLE_NOT_EXIST, ContainerLifecycle, ObjectLifecycle, \
     OBJECT_LIFECYCLE_META, DISABLED_BOTH, DISABLED_EXPIRATION
 
@@ -400,7 +400,6 @@ class LifecycleManageController(WSGIContext):
                 lifecycle.append(rule)
                 lifecycle = lifecycle_to_xml(lifecycle)
             except Exception as e:
-                # TODO rule 별 조회시 해당 ID가 없을 경우 메세지 내용 알아보기
                 return Response(status=400, body=e.message,
                                 headers={LIFECYCLE_RESPONSE_HEADER: True})
 
@@ -409,34 +408,33 @@ class LifecycleManageController(WSGIContext):
         return ret
 
     def DELETE(self, env, start_response):
+        req = Request(copy(env))
         container_lc = ContainerLifecycle(self.account, self.container,
                                           env=env, app=self.app)
-
-        lifecycle = container_lc.get_lifecycle()
 
         if container_lc.status != HTTP_NO_CONTENT:
             return Response(status=container_lc.status)
 
-        if not lifecycle:
-            return Response(status=HTTP_NO_CONTENT)
-
-        req = Request(copy(env))
         if 'lifecycle' in req.params:
-            req = Request(copy(env))
-            req.method = 'POST'
-            req.headers[CONTAINER_LIFECYCLE_SYSMETA] = 'None'
-            req.get_response(self.app)
+            container_lc.delete_lifecycle()
+            self.update_hidden_s3_account(self.account, self.container,
+                                          'DELETE')
+
         elif 'lifecycle_rule' in req.params:
+            lifecycle = container_lc.get_lifecycle()
+
+            if not lifecycle:
+                return Response(status=HTTP_NO_CONTENT)
+
             rule_id = req.params['lifecycle_rule']
             filtered_lc = filter(lambda x: x.get('ID') != rule_id, lifecycle)
 
             if not filtered_lc:
-                filtered_lc = 'None'
-
-            req = Request(copy(env))
-            req.method = 'POST'
-            req.headers[CONTAINER_LIFECYCLE_SYSMETA] = filtered_lc
-            req.get_response(self.app)
+                container_lc.delete_lifecycle()
+                self.update_hidden_s3_account(self.account, self.container,
+                                              'DELETE')
+            else:
+                container_lc.set_lifecycle(filtered_lc)
 
         return Response(status=HTTP_NO_CONTENT)
 
@@ -454,6 +452,9 @@ class LifecycleManageController(WSGIContext):
 
             lifecycle_xml = req.body
             lifecycle = xml_to_list(lifecycle_xml)
+
+            if len(lifecycle) > 1000:
+                raise Exception()
 
             xml_base64 = self.compute_xml_hash(lifecycle_xml)
             if xml_base64 != req.headers['Content-MD5']:
@@ -491,14 +492,9 @@ class LifecycleManageController(WSGIContext):
             check_lifecycle_validation(lifecycle)
 
             # 새로운 lifecycle로 변경
-            req = Request(copy(env))
-            req.method = "POST"
-            req.headers[CONTAINER_LIFECYCLE_SYSMETA] = lifecycle
-
-            resp = req.get_response(self.app)
-            resp_status = get_status_int(resp.status)
-            if resp_status is not HTTP_NO_CONTENT:
-                return resp
+            set_result = container_lc.set_lifecycle(lifecycle)
+            if set_result.status is not HTTP_CREATED:
+                return set_result
 
             self.update_hidden_s3_account(self.account, self.container)
         except LifecycleConfigException as e:
@@ -521,7 +517,7 @@ class LifecycleManageController(WSGIContext):
             xml_base64 = xml_base64[0:-1]
         return xml_base64
 
-    def update_hidden_s3_account(self, account, container):
+    def update_hidden_s3_account(self, account, container, method='PUT'):
         path = '/%s/%s/%s' % (self.s3_accounts, account, container)
         parts, nodes = self.container_ring.get_nodes(self.s3_accounts,
                                                      account)
@@ -537,7 +533,7 @@ class LifecycleManageController(WSGIContext):
             action_headers['x-content-type'] = "text/plain"
             action_headers['x-etag'] = 'd41d8cd98f00b204e9800998ecf8427e'
 
-            conn = http_connect(ip, port, dev, parts, 'PUT', path,
+            conn = http_connect(ip, port, dev, parts, method, path,
                                 action_headers)
             response = conn.getresponse()
             response.read()
