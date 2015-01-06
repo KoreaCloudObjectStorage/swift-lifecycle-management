@@ -26,6 +26,7 @@ class ObjectExpirer(Daemon):
         super(ObjectExpirer, self).__init__(conf)
         self.conf = conf
         self.logger = get_logger(conf, log_route='s3-object-expirer')
+        self.logger.set_statsd_prefix('s3-object-expirer')
         self.interval = int(conf.get('interval') or 300)
         self.s3_expiring_objects_account = \
             (conf.get('auto_create_account_prefix') or '.') + \
@@ -206,8 +207,8 @@ class ObjectExpirer(Daemon):
                     self.delete_actual_object(obj)
                 if lifecycle.get_s3_storage_class() == 'GLACIER':
                     self.delete_glacier_object(obj)
-            self.report_objects += 1
-            self.logger.increment('objects')
+                self.report_objects += 1
+                self.logger.increment('objects')
         except (Exception, Timeout) as err:
             self.logger.increment('errors')
             self.logger.exception(

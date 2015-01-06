@@ -27,8 +27,8 @@ class TransitionMiddleware(object):
         self.temp_path = conf.get('temp_path', '/var/cache/s3/')
 
     def _init_glacier(self):
-        con = Layer2()
-        return con.get_vault('swift-s3-transition')
+        con = Layer2(region_name='ap-northeast-1')
+        return con.create_vault('swift-s3-transition')
 
     def transition(self, env):
         # GET Object body

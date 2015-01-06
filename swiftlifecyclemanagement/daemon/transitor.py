@@ -24,6 +24,7 @@ class ObjectTransitor(Daemon):
         super(ObjectTransitor, self).__init__(conf)
         self.conf = conf
         self.logger = get_logger(conf, log_route='s3-object-transitor')
+        self.logger.set_statsd_prefix('s3-object-transitor')
         self.interval = int(conf.get('interval') or 300)
         self.s3_tr_objects_account = \
             (conf.get('auto_create_account_prefix') or '.') + \
@@ -201,8 +202,6 @@ class ObjectTransitor(Daemon):
 
             self.swift.delete_object(self.s3_tr_objects_account,
                                      container, obj)
-            self.report_objects += 1
-            self.logger.increment('objects')
         except (Exception, Timeout) as err:
             self.logger.increment('errors')
             self.logger.exception(
@@ -219,3 +218,5 @@ class ObjectTransitor(Daemon):
 
         if resp.status_int == 500:
             raise Exception(resp.body)
+        self.report_objects += 1
+        self.logger.increment('objects')

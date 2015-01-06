@@ -41,6 +41,7 @@ class RestoredObjectExpirer(Daemon):
     def __init__(self, conf):
         self.conf = conf
         self.logger = get_logger(conf, log_route='restored-object-expirer')
+        self.logger.set_statsd_prefix('s3-restored-object-expirer')
         self.interval = int(conf.get('interval') or 300)
         self.expire_restored_account = '.s3_expiring_restored_objects'
         conf_path = '/etc/swift/s3-restored-object-expirer.conf'

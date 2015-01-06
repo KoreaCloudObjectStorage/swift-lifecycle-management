@@ -56,7 +56,7 @@ def get_err_response(err):
 
 
 class ObjectController(WSGIContext):
-    def __init__(self, app, account, container_name, object_name, **kwargs):
+    def __init__(self, app, logger, account, container_name, object_name):
         WSGIContext.__init__(self, app)
         self.account = account
         self.container = container_name
@@ -64,6 +64,7 @@ class ObjectController(WSGIContext):
         self.hidden_accounts = {'expiration': '.s3_expiring_objects',
                                 'transition': '.s3_transitioning_objects'}
         self.container_ring = Ring('/etc/swift', ring_name='container')
+        self.logger = logger
 
     def GETorHEAD(self, env, start_response):
         lifecycle = Lifecycle(self.account, self.container, self.object,
@@ -104,6 +105,7 @@ class ObjectController(WSGIContext):
                 resp.content_length = headers[
                     'X-Object-Meta-S3-Content-Length']
                 resp.etag = headers['X-Object-Meta-S3-ETag']
+                resp.status = HTTP_OK
 
             return resp
 
@@ -280,7 +282,8 @@ class ObjectController(WSGIContext):
 
         archive_id = get_glacier_key_from_hidden_object(glacier_obj)
         try:
-            vault = Layer2().get_vault('swift-s3-transition')
+            region = 'ap-northeast-1'
+            vault = Layer2(region_name=region).get_vault('swift-s3-transition')
             vault.delete_archive(archive_id)
             self.hidden_update(
                 hidden={'account': '.glacier_' + self.account,
@@ -360,12 +363,13 @@ class ObjectController(WSGIContext):
 
 
 class LifecycleManageController(WSGIContext):
-    def __init__(self, app, account, container_name, **kwargs):
+    def __init__(self, app, logger, account, container_name, **kwargs):
         WSGIContext.__init__(self, app)
         self.s3_accounts = '.s3_accounts'
         self.container_ring = Ring('/etc/swift', ring_name='container')
         self.account = account
         self.container = container_name
+        self.logger = logger
 
     def GET(self, env, start_response):
         container_lc = ContainerLifecycle(self.account, self.container,
@@ -419,7 +423,6 @@ class LifecycleManageController(WSGIContext):
             container_lc.delete_lifecycle()
             self.update_hidden_s3_account(self.account, self.container,
                                           'DELETE')
-
         elif 'lifecycle_rule' in req.params:
             lifecycle = container_lc.get_lifecycle()
 
@@ -435,6 +438,9 @@ class LifecycleManageController(WSGIContext):
                                               'DELETE')
             else:
                 container_lc.set_lifecycle(filtered_lc)
+
+        self.logger.increment('%s.%s.lifecycle.delete' % (self.account,
+                                                          self.container))
 
         return Response(status=HTTP_NO_CONTENT)
 
@@ -497,6 +503,9 @@ class LifecycleManageController(WSGIContext):
                 return set_result
 
             self.update_hidden_s3_account(self.account, self.container)
+
+            self.logger.increment('%s.%s.lifecycle.put' %
+                                  (self.account, self.container))
         except LifecycleConfigException as e:
             return get_err_response(e.message)
         except Exception as e:
@@ -544,6 +553,7 @@ class LifecycleMiddleware(object):
         self.app = app
         self.conf = conf
         self.logger = get_logger(self.conf, log_route='lifecycle')
+        self.logger.set_statsd_prefix('lifecycle-middleware')
 
     def get_controller(self, env, path):
         req = Request(env)
@@ -601,7 +611,7 @@ class LifecycleMiddleware(object):
 
         if controller is None:
             return self.app(env, start_response)
-        controller = controller(self.app, **path_parts)
+        controller = controller(self.app, self.logger, **path_parts)
 
         if hasattr(controller, req.method):
             res = getattr(controller, req.method)(env, start_response)

@@ -50,6 +50,7 @@ class ObjectRestorer(Daemon):
         self.conf = conf
         self.container_ring = Ring('/etc/swift', ring_name='container')
         self.logger = get_logger(conf, log_route='object-restorer')
+        self.logger.set_statsd_prefix('s3-object-restorer')
         self.interval = int(conf.get('interval') or 300)
         self.restoring_object_account = '.s3_restoring_objects'
         self.expiring_restored_account = '.s3_expiring_restored_objects'
@@ -76,7 +77,7 @@ class ObjectRestorer(Daemon):
         self.process = int(self.conf.get('process', 0))
 
     def _init_glacier(self):
-        con = Layer2()
+        con = Layer2(region_name='ap-northeast-1')
         return con.get_vault('swift-s3-transition')
 
     def report(self, final=False):
@@ -230,7 +231,7 @@ class ObjectRestorer(Daemon):
             self.swift.delete_object(self.restoring_object_account,
                                      self.todo_container, actual_obj)
             self.report_objects += 1
-            self.logger.increment('objects')
+            self.logger.increment('start')
         except (Exception, Timeout) as err:
             self.logger.increment('errors')
             self.logger.exception(
@@ -298,8 +299,8 @@ class ObjectRestorer(Daemon):
             exp_date = strftime("%a, %d %b %Y %H:%M:%S GMT",
                                 gmtime(float(exp_time)))
 
-            metadata['X-Object-Meta-s3-restore'] = 'ongoing-request="false" ' \
-                                                   'expiry-date=%s' % exp_date
+            metadata['X-Object-Meta-s3-restore'] = 'ongoing-request="false", ' \
+                                                   'expiry-date="%s"' % exp_date
             metadata['Content-Length'] = os.path.getsize(tmppath)
             del metadata['X-Object-Meta-s3-restore-expire-days']
 
@@ -311,11 +312,13 @@ class ObjectRestorer(Daemon):
             self.update_action_hidden(self.expiring_restored_account,
                                       exp_time, actual_obj)
             obj_body.close()
+            self.logger.increment('done')
         except UnexpectedResponse as e:
             if e.resp.status_int == 404:
                 self.logger.error('Restoring object not found - %s' %
                                   actual_obj)
         except Exception as e:
+            self.logger.increment('errors')
             self.logger.debug(e)
         finally:
             os.remove(tmppath)
