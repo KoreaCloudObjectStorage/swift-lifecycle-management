@@ -17,8 +17,7 @@ from swift.common.bufferedhttp import http_connect
 from swift.common.ring import Ring
 from swift.common.http import is_success
 
-from swiftlifecyclemanagement.common.lifecycle import \
-    CONTAINER_LIFECYCLE_SYSMETA, Lifecycle, \
+from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
     OBJECT_LIFECYCLE_NOT_EXIST, LIFECYCLE_OK, LIFECYCLE_ERROR, \
     CONTAINER_LIFECYCLE_IS_UPDATED, calc_when_actions_do, ContainerLifecycle, \
     SKIP_THIS_OBJECT
@@ -154,9 +153,7 @@ class LifecyclePropagator(Daemon):
             self.set_rule_propagated(rule)
 
         # Update Container lifecycle
-        cpath = '/v1/%s/%s' % (account, container)
-        self.swift.make_request('POST', cpath, {CONTAINER_LIFECYCLE_SYSMETA:
-                                lifecycle}, (2,))
+        container_lc.set_lifecycle(lifecycle)
 
         self.logger.increment('containers')
 

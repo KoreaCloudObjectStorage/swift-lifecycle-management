@@ -1,14 +1,20 @@
-import ast
 import calendar
+import time
 import dateutil.parser
+import json
 from copy import copy
 from operator import itemgetter
+from hashlib import md5
 
 from swift.common.http import is_success
 from swift.common.swob import Request
+from swift.common.wsgi import make_pre_authed_request
+from swift.common.ring import Ring
 
 # List of Lifecycle Comparison Result
-from swift.common.utils import normalize_delete_at_timestamp
+from swift.common.utils import normalize_delete_at_timestamp, \
+    normalize_timestamp
+from swift.common.bufferedhttp import http_connect
 
 LIFECYCLE_OK = 0
 LIFECYCLE_ERROR = 1
@@ -21,7 +27,6 @@ DISABLED_EXPIRATION = 8
 DISABLED_TRANSITION = 9
 DISABLED_BOTH = 10
 
-CONTAINER_LIFECYCLE_SYSMETA = 'X-Container-Sysmeta-S3-Lifecycle-Configuration'
 GLACIER_FLAG_META = 'X-Object-Meta-Glacier'
 LIFECYCLE_RESPONSE_HEADER = 'X-Lifecycle-Response'
 
@@ -41,6 +46,8 @@ class LifecycleCommon(object):
         self.app = app
         self.headers = None
         self.status = None
+        self.account = account
+        self.container = container
         self.path = '/v1/%s/%s' % (account, container)
 
     def _initialize(self):
@@ -114,16 +121,74 @@ class ContainerLifecycle(LifecycleCommon):
         return rules
 
     def get_lifecycle(self):
-        if not self.headers or CONTAINER_LIFECYCLE_SYSMETA not in self.headers:
+
+        path = '/v1/.s3_bucket_lifecycle/%s/%s' % (self.account,
+                                                   self.container)
+
+        if self.swift_client:
+            resp = self.swift_client.make_request('GET', path, {}, {2})
+        else:
+            req = make_pre_authed_request(self.env, 'GET', path=path)
+            resp = req.get_response(self.app)
+
+        if resp.status_int == 404:
             return None
 
-        if self.headers[CONTAINER_LIFECYCLE_SYSMETA] == 'None':
-            return None
+        lc_raw = resp.body
 
-        return ast.literal_eval(self.headers[CONTAINER_LIFECYCLE_SYSMETA])
+        return json.loads(lc_raw)
+
+    def set_lifecycle(self, lifecycle):
+        lifecycle = json.dumps(lifecycle)
+        return self._delete_or_save_lifecycle('PUT', lifecycle)
+
+    def delete_lifecycle(self):
+        self._delete_or_save_lifecycle('DELETE')
+
+    def _delete_or_save_lifecycle(self, method, lifecycle=None):
+        path = '/.s3_bucket_lifecycle/%s/%s' % (self.account, self.container)
+        oring = Ring('/etc/swift', ring_name='object')
+        cring = Ring('/etc/swift', ring_name='container')
+        part, nodes = oring.get_nodes('.s3_bucket_lifecycle', self.account,
+                                      self.container)
+        cpart, cnodes = cring.get_nodes('.s3_bucket_lifecycle', self.account)
+        now_ts = normalize_timestamp(time.time())
+
+        i = 0
+        for node in nodes:
+            ip = node['ip']
+            port = node['port']
+            dev = node['device']
+            headers = dict()
+            headers['user-agent'] = 'lifecycle-uploader'
+            headers['X-Timestamp'] = now_ts
+            headers['referer'] = 'lifecycle-uploader'
+            headers['X-Container-Partition'] = cpart
+            headers['X-Container-Host'] = '%(ip)s:%(port)s' % cnodes[i]
+            headers['X-Container-Device'] = cnodes[i]['device']
+
+            if lifecycle:
+                headers['content-length'] = len(lifecycle)
+                headers['etags'] = self._compute_md5(lifecycle)
+                headers['content-type'] = 'text/plain'
+
+            conn = http_connect(ip, port, dev, part, method, path,
+                                headers)
+
+            if method == 'PUT':
+                conn.send(lifecycle)
+
+            response = conn.getresponse()
+            i += 1
+        return response
 
     def reload(self):
         self._initialize()
+
+    def _compute_md5(self, value):
+        v = md5()
+        v.update(value)
+        return v.hexdigest()
 
 
 class ObjectLifecycle(LifecycleCommon):
