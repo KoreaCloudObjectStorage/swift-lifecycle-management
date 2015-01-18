@@ -130,6 +130,14 @@ class ObjectController(WSGIContext):
             object_rules = lifecycle.container.get_rules_by_object_name(
                 self.object)
             new_header = dict()
+
+            for key, value in headers.iteritems():
+                _key = key.lower()
+                if not _key.startswith('x-object-meta'):
+                    continue
+                new_header[key] = value
+
+            # new_header 에 기존 object 의 metadata 도 넣기
             for rule in object_rules:
                 h = make_object_metadata_from_rule(rule)
                 new_header.update(h)
