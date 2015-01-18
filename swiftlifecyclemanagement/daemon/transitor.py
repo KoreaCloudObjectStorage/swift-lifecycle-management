@@ -200,8 +200,8 @@ class ObjectTransitor(Daemon):
                     if actual_expire_time == int(container):
                         self.request_transition(obj)
 
-            self.swift.delete_object(self.s3_tr_objects_account,
-                                     container, obj)
+                    self.swift.delete_object(self.s3_tr_objects_account,
+                                             container, obj)
         except (Exception, Timeout) as err:
             self.logger.increment('errors')
             self.logger.exception(

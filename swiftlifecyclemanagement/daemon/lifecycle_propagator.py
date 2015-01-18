@@ -215,6 +215,8 @@ class LifecyclePropagator(Daemon):
 
             metadata = make_object_metadata_from_rule(rule)
             lc.object.headers.update(metadata)
+            obj_last_modi = lc.object.headers['Last-Modified']
+
             for h in lc.object.headers.copy():
                 if not is_user_meta('object', h):
                     del lc.object.headers[h]
@@ -225,7 +227,6 @@ class LifecyclePropagator(Daemon):
                 propagated = False
                 continue
 
-            obj_last_modi = lc.object.headers['Last-Modified']
             obj_last_modi = gmt_to_timestamp(obj_last_modi)
             actionList = calc_when_actions_do(rule, obj_last_modi)
             for action, at_time in actionList.iteritems():

@@ -15,7 +15,7 @@ from swift.common.utils import get_logger, dump_recon_cache
 from swift.common.http import HTTP_NOT_FOUND, HTTP_CONFLICT
 
 from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
-    LIFECYCLE_OK, calc_when_actions_do, DISABLED_TRANSITION
+    LIFECYCLE_OK, calc_when_actions_do, DISABLED_TRANSITION, SKIP_THIS_OBJECT
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp, \
     get_objects_by_prefix, get_glacier_objname_from_hidden_object, \
     get_glacier_key_from_hidden_object
@@ -209,14 +209,13 @@ class ObjectExpirer(Daemon):
                     self.delete_glacier_object(obj)
                 self.report_objects += 1
                 self.logger.increment('objects')
+                self.swift.delete_object(self.s3_expiring_objects_account,
+                                         hidden_container, obj)
         except (Exception, Timeout) as err:
             self.logger.increment('errors')
             self.logger.exception(
                 _('Exception while deleting object %s %s %s') %
                 (hidden_container, obj, str(err)))
-        finally:
-            self.swift.delete_object(self.s3_expiring_objects_account,
-                                     hidden_container, obj)
 
         self.logger.timing_since('timing', start_time)
         self.report()
