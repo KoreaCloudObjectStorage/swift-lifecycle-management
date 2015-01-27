@@ -128,7 +128,9 @@ class ContainerLifecycle(LifecycleCommon):
         if self.swift_client:
             resp = self.swift_client.make_request('GET', path, {}, {2})
         else:
-            req = make_pre_authed_request(self.env, 'GET', path=path)
+            req = make_pre_authed_request(self.env, 'GET', path=path,
+                                          agent='lifecycle-middleware')
+            req.environ['swift.proxy_access_log_made'] = True
             resp = req.get_response(self.app)
 
         if resp.status_int == 404:
