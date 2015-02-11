@@ -222,6 +222,9 @@ class ObjectController(WSGIContext):
         if not lifecycle:
             return self.app
 
+        if 'HTTP_X_STATIC_LARGE_OBJECT' in env:
+            return self.app
+
         rules = container_lc.get_rules_by_object_name(self.object)
         rule_header = dict()
 
@@ -425,6 +428,11 @@ class LifecycleManageController(WSGIContext):
                                           env=env, app=self.app)
 
         if container_lc.status != HTTP_NO_CONTENT:
+            if 'force_delete' not in req.params:
+                return Response(status=container_lc.status)
+
+        if container_lc.status != HTTP_NOT_FOUND \
+            and 'force_delete' in req.params:
             return Response(status=container_lc.status)
 
         if 'lifecycle' in req.params:
