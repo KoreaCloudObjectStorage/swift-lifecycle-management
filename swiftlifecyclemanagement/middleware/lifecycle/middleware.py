@@ -222,6 +222,9 @@ class ObjectController(WSGIContext):
         if not lifecycle:
             return self.app
 
+        if 'HTTP_X_STATIC_LARGE_OBJECT' in env:
+            return self.app
+
         rules = container_lc.get_rules_by_object_name(self.object)
         rule_header = dict()
 
