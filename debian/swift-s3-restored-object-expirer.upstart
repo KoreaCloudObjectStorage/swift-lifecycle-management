@@ -19,6 +19,6 @@ post-stop script
   CONF=/etc/swift/s3-restored-object-expirer.conf
   SCRIPT=/usr/bin/swift-s3-restored-object-expirer
 
-  PID=`ps -ef | grep '/usr/bin/python '$SCRIPT' '$CONF | head -1 | awk '{print $2}'`
+  PID=`ps -ef | grep '/usr/bin/python '$SCRIPT' '$CONF | grep -v grep | head -1 | awk '{print $2}'`
   kill -9 $PID
 end script
