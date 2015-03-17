@@ -194,7 +194,6 @@ class ObjectExpirer(Daemon):
             account, container, object = obj.split('/', 2)
             lifecycle = Lifecycle(account, container, object,
                                   swift_client=self.swift)
-            # object , container 404 일 경우.. 에러터짐
             object_header = lifecycle.object.headers
             object_rule = lifecycle.get_object_rule_by_action('Expiration')
             last_modified = gmt_to_timestamp(object_header['Last-Modified'])
