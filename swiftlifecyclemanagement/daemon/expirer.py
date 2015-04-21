@@ -4,6 +4,8 @@ from random import random
 from time import time
 from os.path import join
 
+from raven import Client
+
 from boto.glacier.layer2 import Layer2
 from eventlet import sleep, Timeout
 from eventlet.greenpool import GreenPool
@@ -18,7 +20,7 @@ from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
     LIFECYCLE_OK, calc_when_actions_do, DISABLED_TRANSITION, SKIP_THIS_OBJECT
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp, \
     get_objects_by_prefix, get_glacier_objname_from_hidden_object, \
-    get_glacier_key_from_hidden_object
+    get_glacier_key_from_hidden_object, report_exception
 
 
 class ObjectExpirer(Daemon):
@@ -50,6 +52,7 @@ class ObjectExpirer(Daemon):
             raise ValueError("concurrency must be set to at least 1")
         self.processes = int(self.conf.get('processes', 0))
         self.process = int(self.conf.get('process', 0))
+        self.client = Client(self.conf.get('sentry_sdn', ''))
 
     def _init_glacier(self):
         con = Layer2(region_name='ap-northeast-1')
@@ -126,13 +129,13 @@ class ObjectExpirer(Daemon):
                         container,
                         acceptable_statuses=(2, HTTP_NOT_FOUND, HTTP_CONFLICT))
                 except (Exception, Timeout) as err:
-                    self.logger.exception(
-                        _('Exception while deleting container %s %s') %
-                        (container, str(err)))
+                    report_exception(self.logger,
+                                     _('Exception while deleting container %s %s') %
+                                     (container, str(err)), self.client.captureException())
             self.logger.debug(_('Run end'))
             self.report(final=True)
         except (Exception, Timeout):
-            self.logger.exception(_('Unhandled exception'))
+            report_exception(self.logger, _('Unhandled exception'), self.client)
 
     def run_forever(self, *args, **kwargs):
         """
@@ -149,7 +152,7 @@ class ObjectExpirer(Daemon):
             try:
                 self.run_once(*args, **kwargs)
             except (Exception, Timeout):
-                self.logger.exception(_('Unhandled exception'))
+                report_exception(self.logger, _('Unhandled exception'), self.client)
             elapsed = time() - begin
             if elapsed < self.interval:
                 sleep(random() * (self.interval - elapsed))
@@ -213,9 +216,9 @@ class ObjectExpirer(Daemon):
                                          hidden_container, obj)
         except (Exception, Timeout) as err:
             self.logger.increment('errors')
-            self.logger.exception(
-                _('Exception while deleting object %s %s %s') %
-                (hidden_container, obj, str(err)))
+            report_exception(self.logger,
+                             _('Exception while deleting object %s %s %s') %
+                             (hidden_container, obj, str(err)), self.client)
 
         self.logger.timing_since('timing', start_time)
         self.report()

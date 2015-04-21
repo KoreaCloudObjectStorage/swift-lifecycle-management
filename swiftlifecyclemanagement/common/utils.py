@@ -2,6 +2,7 @@ import calendar
 import json
 from datetime import datetime
 from swift.common.wsgi import make_pre_authed_env, make_pre_authed_request
+from swift import gettext_ as _
 
 
 def gmt_to_timestamp(gmt_time):
@@ -69,3 +70,10 @@ def get_glacier_objname_from_hidden_object(hidden_obj):
     keylen = int(keylenstr)
     endpoint = len(hidden_obj) - (keylen + len(keylenstr) + 2)
     return hidden_obj[:endpoint]
+
+
+def report_exception(logger=None, msg=None, reporter=None):
+    if logger is not None and msg is not None:
+        logger.exception(_(msg))
+    if reporter is not None:
+        reporter.captureException()
