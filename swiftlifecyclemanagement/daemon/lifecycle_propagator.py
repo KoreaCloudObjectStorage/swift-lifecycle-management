@@ -4,6 +4,8 @@ from time import time
 from random import random
 from os.path import join
 
+from raven import Client
+
 from eventlet import sleep, Timeout
 from eventlet.greenpool import GreenPool
 
@@ -22,7 +24,7 @@ from swiftlifecyclemanagement.common.lifecycle import Lifecycle, \
     CONTAINER_LIFECYCLE_IS_UPDATED, calc_when_actions_do, ContainerLifecycle, \
     SKIP_THIS_OBJECT
 from swiftlifecyclemanagement.common.utils import gmt_to_timestamp, \
-    get_objects_by_prefix
+    get_objects_by_prefix, report_exception
 from swiftlifecyclemanagement.middleware.lifecycle.utils import \
     make_object_metadata_from_rule
 
@@ -54,6 +56,7 @@ class LifecyclePropagator(Daemon):
             raise ValueError("concurrency must be set to at least 1")
         self.processes = int(self.conf.get('processes', 0))
         self.process = int(self.conf.get('process', 0))
+        self.client = Client(self.conf.get('sentry_sdn', ''))
 
     def report(self, final=False):
         """
@@ -113,7 +116,8 @@ class LifecyclePropagator(Daemon):
             self.report(final=True)
 
         except (Exception, Timeout):
-            self.logger.exception(_('Unhandled exception'))
+
+            report_exception(self.logger, _('Unhandled exception'), self.client)
 
     def run_forever(self, *args, **kwargs):
         """
@@ -130,7 +134,7 @@ class LifecyclePropagator(Daemon):
             try:
                 self.run_once(*args, **kwargs)
             except (Exception, Timeout):
-                self.logger.exception(_('Unhandled exception'))
+                report_exception(self.logger, _('Unhandled exception'), self.client)
             elapsed = time() - begin
             if elapsed < self.interval:
                 sleep(random() * (self.interval - elapsed))

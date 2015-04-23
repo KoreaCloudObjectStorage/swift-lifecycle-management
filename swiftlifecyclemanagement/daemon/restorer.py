@@ -20,6 +20,8 @@ from random import random
 from time import time, strftime, gmtime
 from os.path import join
 
+from raven import Client
+
 from boto.glacier.layer2 import Layer2
 from eventlet import sleep, Timeout
 from eventlet.greenpool import GreenPool
@@ -35,7 +37,7 @@ from swift.common.utils import get_logger, dump_recon_cache, \
 from swiftlifecyclemanagement.common.lifecycle import calc_nextDay
 from swiftlifecyclemanagement.common.utils import \
     get_glacier_key_from_hidden_object, \
-    get_glacier_objname_from_hidden_object, make_glacier_hidden_object_name, get_objects_by_prefix
+    get_glacier_objname_from_hidden_object, make_glacier_hidden_object_name, get_objects_by_prefix, report_exception
 
 
 class ObjectRestorer(Daemon):
@@ -75,6 +77,7 @@ class ObjectRestorer(Daemon):
             raise ValueError("concurrency must be set to at least 1")
         self.processes = int(self.conf.get('processes', 0))
         self.process = int(self.conf.get('process', 0))
+        self.client = Client(self.conf.get('sentry_sdn', ''))
 
     def _init_glacier(self):
         con = Layer2(region_name='ap-northeast-1')
@@ -148,7 +151,7 @@ class ObjectRestorer(Daemon):
             self.logger.debug(_('Run end'))
             self.report(final=True)
         except (Exception, Timeout) as e:
-            self.logger.exception(_('Unhandled exception'))
+            report_exception(self.logger, _('Unhandled exception'), self.client)
 
     def run_forever(self, *args, **kwargs):
         """
@@ -165,7 +168,7 @@ class ObjectRestorer(Daemon):
             try:
                 self.run_once(*args, **kwargs)
             except (Exception, Timeout):
-                self.logger.exception(_('Unhandled exception'))
+                report_exception(self.logger, _('Unhandled exception'), self.client)
             elapsed = time() - begin
             if elapsed < self.interval:
                 sleep(random() * (self.interval - elapsed))
@@ -234,9 +237,9 @@ class ObjectRestorer(Daemon):
             self.logger.increment('start')
         except (Exception, Timeout) as err:
             self.logger.increment('errors')
-            self.logger.exception(
-                _('Exception while restoring object %s. %s') %
-                (obj, str(err)))
+            report_exception(self.logger.exception,
+                             _('Exception while restoring object %s. %s') %
+                             (obj, str(err)), self.client)
         self.logger.timing_since('timing', start_time)
         self.report()
 
