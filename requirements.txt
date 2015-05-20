@@ -1,0 +1,4 @@
+swift>=2.2.0
+boto>=2.36.0
+python-dateutil>=2.2
+raven>=5.2.0
